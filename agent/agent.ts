@@ -278,17 +278,26 @@ function portStatus(port: number): "unknown" {
 }
 
 async function openFirewallPort(port: number) {
+  // The install script adds a narrow sudoers drop-in so the agent user
+  // can run exactly `ufw allow <port>` and `ufw delete allow <port>`.
+  // Fall through silently if ufw/sudo aren't present.
   try {
-    await runCommand("ufw", ["allow", `${port}`]);
+    await runCommand("sudo", ["-n", "ufw", "allow", `${port}`]);
   } catch {
-    // ufw may not be present; non-fatal.
+    try {
+      await runCommand("ufw", ["allow", `${port}`]);
+    } catch {}
   }
 }
 
 async function closeFirewallPort(port: number) {
   try {
-    await runCommand("ufw", ["delete", "allow", `${port}`]);
-  } catch {}
+    await runCommand("sudo", ["-n", "ufw", "delete", "allow", `${port}`]);
+  } catch {
+    try {
+      await runCommand("ufw", ["delete", "allow", `${port}`]);
+    } catch {}
+  }
 }
 
 function runCommand(cmd: string, args: string[]): Promise<number> {

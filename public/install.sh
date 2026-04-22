@@ -248,14 +248,24 @@ fi
 # --- Unattended security upgrades -------------------------------------------
 
 if [[ -f /etc/apt/apt.conf.d/50unattended-upgrades ]]; then
-  if [[ ! -f /etc/apt/apt.conf.d/20auto-upgrades ]]; then
-    say "Enabling unattended security updates"
-    cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CFG'
+  say "Enabling unattended security updates with nightly auto-reboot"
+  cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CFG'
 APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 CFG
-  fi
+
+  # Drop-in so we don't stomp on distro-provided defaults. Enables reboot
+  # window in the small hours and removes orphaned deps after upgrade.
+  cat > /etc/apt/apt.conf.d/99gameserveros-upgrades <<'CFG'
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:00";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-Unused-Dependencies "true";
+Unattended-Upgrade::MinimalSteps "true";
+CFG
 fi
 
 # --- Kernel network hardening (sysctl) --------------------------------------
@@ -299,6 +309,79 @@ SYSCTL
   sysctl -p "${SYSCTL_FILE}" >/dev/null 2>&1 || true
 fi
 
+# --- SSH hardening (conservative — won't lock anyone out) -------------------
+
+SSHD_CONFIG="/etc/ssh/sshd_config.d/99-gameserveros-hardening.conf"
+if [[ -d /etc/ssh/sshd_config.d ]] && [[ ! -f "${SSHD_CONFIG}" ]]; then
+  say "Applying SSH hardening"
+  cat > "${SSHD_CONFIG}" <<'SSH'
+# Baseline SSH hardening. PasswordAuthentication is intentionally left at
+# the distro default so remote installs don't accidentally lock themselves
+# out. If you're using keys, set `PasswordAuthentication no` manually.
+Protocol 2
+PermitEmptyPasswords no
+PermitRootLogin prohibit-password
+MaxAuthTries 3
+LoginGraceTime 30
+ClientAliveInterval 300
+ClientAliveCountMax 2
+X11Forwarding no
+AllowAgentForwarding no
+AllowTcpForwarding no
+UseDNS no
+SSH
+  systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+fi
+
+# --- journald: cap log disk usage ------------------------------------------
+
+JOURNALD_DROPIN="/etc/systemd/journald.conf.d/gameserveros.conf"
+mkdir -p "$(dirname "${JOURNALD_DROPIN}")"
+if [[ ! -f "${JOURNALD_DROPIN}" ]]; then
+  say "Capping journald disk usage at 500MB (prevents noisy crash-looping from filling /)"
+  cat > "${JOURNALD_DROPIN}" <<'JD'
+[Journal]
+SystemMaxUse=500M
+SystemKeepFree=1G
+RuntimeMaxUse=100M
+MaxRetentionSec=1month
+# Dampen rate from a single service so a crash-loop can't DoS the log.
+RateLimitIntervalSec=30s
+RateLimitBurst=1000
+JD
+  systemctl restart systemd-journald >/dev/null 2>&1 || true
+fi
+
+# --- Disable core dumps (prevents on-disk credential leakage) --------------
+
+if [[ ! -f /etc/security/limits.d/99-gameserveros-nocore.conf ]]; then
+  say "Disabling core dumps"
+  cat > /etc/security/limits.d/99-gameserveros-nocore.conf <<'LIM'
+* hard core 0
+* soft core 0
+LIM
+  echo "kernel.core_pattern=|/bin/false" > /etc/sysctl.d/99-gameserveros-nocore.conf
+  sysctl -p /etc/sysctl.d/99-gameserveros-nocore.conf >/dev/null 2>&1 || true
+fi
+
+# --- Sudoers: let the agent manage UFW without full root -------------------
+
+SUDOERS_DROPIN="/etc/sudoers.d/gameserveros-agent"
+if [[ ! -f "${SUDOERS_DROPIN}" ]]; then
+  say "Granting gameserveros narrow sudo for firewall control"
+  cat > "${SUDOERS_DROPIN}" <<EOF
+# Allow the agent to open/close firewall ports as game servers start/stop,
+# but nothing else. Reviewed by install.sh (see GameServerOS docs).
+Defaults:${AGENT_USER} !requiretty
+${AGENT_USER} ALL=(root) NOPASSWD: /usr/sbin/ufw allow *, /usr/sbin/ufw delete allow *, /usr/sbin/ufw status
+EOF
+  chmod 0440 "${SUDOERS_DROPIN}"
+  visudo -c -f "${SUDOERS_DROPIN}" >/dev/null 2>&1 || {
+    rm -f "${SUDOERS_DROPIN}"
+    warn "sudoers drop-in failed validation; reverted. Firewall port open/close will require manual config."
+  }
+fi
+
 say "Installation complete. The agent should appear in your dashboard within 30 seconds."
 printf "\n"
 printf "  Service:     systemctl status gameserveros-agent\n"
@@ -307,4 +390,9 @@ printf "  Config:      %s\n" "${CONFIG_FILE}"
 printf "  Firewall:    ufw status\n"
 printf "  Fail2ban:    fail2ban-client status sshd\n"
 printf "  Auto-update: unattended-upgrades --dry-run\n"
+printf "  SSH harden:  sshd -T | grep -E 'permitrootlogin|maxauthtries|x11forwarding'\n"
+printf "\n"
+printf "\033[1;32mSecurity baseline applied.\033[0m Manual next steps:\n"
+printf "  - Add your SSH public key and set PasswordAuthentication=no in /etc/ssh/sshd_config.d/\n"
+printf "  - Review \`unattended-upgrades --dry-run\` to confirm the allowed-origins list\n"
 printf "\n"

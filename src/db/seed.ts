@@ -48,7 +48,7 @@ const games = [
     defaultPort: 27015,
     defaultMaxPlayers: 32,
     startupCommand:
-      "./srcds_run -game csgo -console -usercon +game_type 0 +game_mode 1 +mapgroup mg_active +map de_dust2 -port {PORT}",
+      "rm -f ./bin/libgcc_s.so.1 ./bin/libstdc++.so.6 && bash ./srcds_run -game csgo -console -usercon +game_type 0 +game_mode 1 +mapgroup mg_active +map de_dust2 -port {PORT}",
     description:
       "Classic competitive FPS. CS:GO dedicated server (pre-CS2) is still free-anonymous and perfect for a private lobby.",
   },
