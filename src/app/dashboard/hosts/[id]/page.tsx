@@ -33,10 +33,20 @@ export default async function HostDetailPage({
     .from(supportedGames)
     .orderBy(supportedGames.name);
 
+  // NEXT_PUBLIC_* env vars are inlined at build time, but the image is
+  // built before the operator sets NEXT_PUBLIC_AGENT_WS_URL in Unraid. Read
+  // it here on the server (where process.env is live at request time) and
+  // pass it down as a prop so the browser terminal uses the correct URL.
+  const wsUrl =
+    process.env.NEXT_PUBLIC_AGENT_WS_URL ??
+    process.env.AGENT_WS_URL ??
+    "";
+
   return (
     <HostDetail
       initialHost={{ ...host, effectiveStatus: computeStatus(host) }}
       games={games}
+      wsUrl={wsUrl}
     />
   );
 }

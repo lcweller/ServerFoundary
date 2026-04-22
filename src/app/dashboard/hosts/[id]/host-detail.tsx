@@ -36,9 +36,11 @@ type HostWithStatus = Host & {
 export function HostDetail({
   initialHost,
   games,
+  wsUrl,
 }: {
   initialHost: HostWithStatus;
   games: { id: string; name: string; defaultPort: number }[];
+  wsUrl: string;
 }) {
   const router = useRouter();
   const [host, setHost] = useState<HostWithStatus>(initialHost);
@@ -195,7 +197,7 @@ export function HostDetail({
           <GameServersTab host={host} games={games} />
         </TabsContent>
         <TabsContent value="terminal">
-          <TerminalTab host={host} />
+          <TerminalTab host={host} wsUrl={wsUrl} />
         </TabsContent>
         <TabsContent value="logs">
           <LogsTab host={host} />

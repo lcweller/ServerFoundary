@@ -7,9 +7,11 @@ import { Card, CardContent } from "@/components/ui/card";
 
 export function BrowserTerminal({
   hostId,
+  wsUrl,
   onClose,
 }: {
   hostId: string;
+  wsUrl: string;
   onClose: () => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -49,9 +51,8 @@ export function BrowserTerminal({
       const onResize = () => fit?.fit();
       window.addEventListener("resize", onResize);
 
-      const configured = process.env.NEXT_PUBLIC_AGENT_WS_URL;
-      const base = configured
-        ? configured.replace(/\/$/, "")
+      const base = wsUrl
+        ? wsUrl.replace(/\/$/, "")
         : `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:3001`;
       ws = new WebSocket(`${base}/api/v1/terminal/${hostId}`);
 
@@ -108,7 +109,7 @@ export function BrowserTerminal({
       } catch {}
       terminal?.dispose();
     };
-  }, [hostId]);
+  }, [hostId, wsUrl]);
 
   return (
     <Card>

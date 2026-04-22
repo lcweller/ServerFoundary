@@ -9,8 +9,10 @@ import { BrowserTerminal } from "./browser-terminal";
 
 export function TerminalTab({
   host,
+  wsUrl,
 }: {
   host: Host & { effectiveStatus: "online" | "offline" | "connecting" };
+  wsUrl: string;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -46,5 +48,11 @@ export function TerminalTab({
     );
   }
 
-  return <BrowserTerminal hostId={host.id} onClose={() => setOpen(false)} />;
+  return (
+    <BrowserTerminal
+      hostId={host.id}
+      wsUrl={wsUrl}
+      onClose={() => setOpen(false)}
+    />
+  );
 }
