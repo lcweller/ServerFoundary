@@ -11,7 +11,7 @@
  */
 
 import { spawn, type ChildProcess } from "child_process";
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, readFileSync } from "fs";
 import { homedir, hostname, networkInterfaces, totalmem, uptime, freemem, cpus, release, platform as osPlatform } from "os";
 import { promises as fs } from "fs";
 import * as path from "path";
@@ -269,6 +269,75 @@ interface RunningServer {
 
 const servers = new Map<string, RunningServer>();
 
+// --- Manifest support -------------------------------------------------------
+// Each server directory gets a .gameserveros.json written at deploy time.
+// On startup / reconnect the agent walks SERVERS_DIR, parses every manifest,
+// and reports them to the dashboard via an "adopt_servers" message so the
+// dashboard can back-populate a fresh install (e.g., host deleted and
+// re-added) without the user having to rebuild each game server by hand.
+const MANIFEST_NAME = ".gameserveros.json";
+
+interface ServerManifest {
+  id: string;
+  name: string;
+  gameId: string;
+  steamAppId: number | null;
+  port: number;
+  startupCommand: string;
+}
+
+function writeManifest(dir: string, m: ServerManifest): void {
+  try {
+    ensureDir(dir);
+    const fs = require("fs") as typeof import("fs");
+    fs.writeFileSync(path.join(dir, MANIFEST_NAME), JSON.stringify(m, null, 2));
+  } catch (err) {
+    log("warn", `Failed to write manifest to ${dir}:`, (err as Error).message);
+  }
+}
+
+function loadAllManifests(): ServerManifest[] {
+  const out: ServerManifest[] = [];
+  try {
+    if (!existsSync(SERVERS_DIR)) return out;
+    const fs = require("fs") as typeof import("fs");
+    for (const entry of fs.readdirSync(SERVERS_DIR, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const mp = path.join(SERVERS_DIR, entry.name, MANIFEST_NAME);
+      if (!existsSync(mp)) continue;
+      try {
+        const parsed = JSON.parse(readFileSync(mp, "utf8")) as ServerManifest;
+        if (parsed?.id && parsed?.name && parsed?.gameId && parsed?.port) {
+          out.push(parsed);
+        }
+      } catch (err) {
+        log("warn", `Skipping unreadable manifest at ${mp}:`, (err as Error).message);
+      }
+    }
+  } catch (err) {
+    log("warn", "Failed to scan server manifests:", (err as Error).message);
+  }
+  return out;
+}
+
+function hydrateServersFromManifests(): void {
+  for (const m of loadAllManifests()) {
+    if (servers.has(m.id)) continue;
+    servers.set(m.id, {
+      id: m.id,
+      name: m.name,
+      gameId: m.gameId,
+      port: m.port,
+      startupCommand: m.startupCommand,
+      steamAppId: m.steamAppId,
+      proc: null,
+      status: "stopped",
+      restartAttempts: 0,
+      dir: path.join(SERVERS_DIR, m.id),
+    });
+  }
+}
+
 function ensureDir(p: string) {
   if (!existsSync(p)) mkdirSync(p, { recursive: true });
 }
@@ -404,6 +473,7 @@ class AgentConnection {
     ws.on("open", () => {
       log("info", "Connected to dashboard.");
       this.reconnectAttempts = 0;
+      this.announceAdoptions();
       this.scheduleHeartbeat();
     });
     ws.on("message", (raw) => {
@@ -483,6 +553,16 @@ class AgentConnection {
     }
   }
 
+  private announceAdoptions() {
+    // Report every server we have on disk so the dashboard can back-populate
+    // rows that don't exist (host was deleted and re-added, or this is a
+    // fresh enrollment of an agent that already has installations).
+    const manifests = loadAllManifests();
+    if (manifests.length === 0) return;
+    log("info", `Announcing ${manifests.length} existing server(s) for adoption`);
+    this.send({ type: "adopt_servers", servers: manifests });
+  }
+
   private async handleCommand(msg: Record<string, unknown>) {
     const type = String(msg.type ?? "");
     try {
@@ -553,6 +633,14 @@ class AgentConnection {
       dir,
     };
     servers.set(spec.id, entry);
+    writeManifest(dir, {
+      id: spec.id,
+      name: spec.name,
+      gameId: spec.gameId,
+      steamAppId: spec.steamAppId,
+      port: spec.port,
+      startupCommand: spec.startupCommand,
+    });
     this.reportStatus(entry);
     this.sendLog(spec.id, "info", "system", `Installing to ${dir}`);
 
@@ -736,6 +824,10 @@ function main() {
     "info",
     `Dashboard=${config.dashboardUrl} host=${config.hostId}`,
   );
+  hydrateServersFromManifests();
+  if (servers.size > 0) {
+    log("info", `Loaded ${servers.size} existing server(s) from disk`);
+  }
   const conn = new AgentConnection(config);
   conn.start();
 

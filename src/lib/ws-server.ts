@@ -54,6 +54,17 @@ type AgentMessage =
   | {
       type: "terminal_closed";
       sessionId: string;
+    }
+  | {
+      type: "adopt_servers";
+      servers?: Array<{
+        id: string;
+        name: string;
+        gameId: string;
+        steamAppId: number | null;
+        port: number;
+        startupCommand: string;
+      }>;
     };
 
 let started = false;
@@ -276,6 +287,80 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
       browserSessions.delete(msg.sessionId);
       break;
     }
+    case "adopt_servers": {
+      if (!Array.isArray(msg.servers) || msg.servers.length === 0) break;
+      await adoptServers(hostId, msg.servers);
+      break;
+    }
+  }
+}
+
+/**
+ * Back-populate game_servers rows from whatever the agent has on disk. Two
+ * cases this handles:
+ *   1. User deleted the host in the dashboard (which cascaded all its
+ *      game_servers rows), reinstalled the agent, and re-enrolled. The
+ *      /opt/gameserveros/servers/<uuid>/ dirs are still there. We rebuild
+ *      DB rows with the same UUIDs so history is preserved.
+ *   2. Fresh agent whose rows already exist and correctly reference this
+ *      host — no-op.
+ */
+async function adoptServers(
+  hostId: string,
+  incoming: Array<{
+    id: string;
+    name: string;
+    gameId: string;
+    steamAppId: number | null;
+    port: number;
+    startupCommand: string;
+  }>,
+) {
+  const [host] = await db
+    .select({ id: hosts.id, userId: hosts.userId })
+    .from(hosts)
+    .where(eq(hosts.id, hostId))
+    .limit(1);
+  if (!host) return;
+
+  for (const s of incoming) {
+    if (!s.id || !s.name || !s.gameId || !s.port) continue;
+    const [existing] = await db
+      .select({ id: gameServers.id, hostId: gameServers.hostId })
+      .from(gameServers)
+      .where(eq(gameServers.id, s.id))
+      .limit(1);
+
+    if (!existing) {
+      // Adopt: insert under this host.
+      await db.insert(gameServers).values({
+        id: s.id,
+        hostId: host.id,
+        userId: host.userId,
+        name: s.name,
+        gameId: s.gameId,
+        status: "stopped",
+        port: s.port,
+        playersOnline: 0,
+        maxPlayers: 0,
+      });
+      await db.insert(gameServerLogs).values({
+        gameServerId: s.id,
+        source: "system",
+        level: "info",
+        message:
+          "Adopted existing installation from the agent. Click Start to bring it online.",
+      });
+      console.log(`[agent] adopted ${s.id} (${s.gameId}) under host=${hostId}`);
+    } else if (existing.hostId !== host.id) {
+      // Server moved to a different host (same agent bin relocated?). Retarget.
+      await db
+        .update(gameServers)
+        .set({ hostId: host.id, userId: host.userId, updatedAt: new Date() })
+        .where(eq(gameServers.id, s.id));
+      console.log(`[agent] moved ${s.id} to host=${hostId}`);
+    }
+    // else: already correctly owned by this host — nothing to do.
   }
 }
 
