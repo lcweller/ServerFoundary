@@ -10,6 +10,13 @@ set -eu
 : "${MIGRATE_ON_START:=true}"
 : "${SEED_ON_START:=true}"
 
+# Shared secret used by Next.js to dispatch agent commands through the
+# ws-server's /internal/dispatch endpoint. Regenerated every container start
+# so there's no long-lived key written to disk.
+if [ -z "${INTERNAL_API_KEY:-}" ]; then
+  export INTERNAL_API_KEY="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+fi
+
 if [ "${MIGRATE_ON_START}" = "true" ] && [ -n "${DATABASE_URL:-}" ]; then
   echo "[entrypoint] running database migrations..."
   node dist/migrate.cjs || {

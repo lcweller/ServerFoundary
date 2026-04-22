@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { gameServers, hosts, supportedGames, gameServerLogs } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { sendCommand, isAgentConnected } from "@/lib/agent-hub";
+import { dispatchCommand } from "@/lib/agent-hub";
 
 export async function GET(
   _req: NextRequest,
@@ -93,19 +93,18 @@ export async function POST(
     message: `Server "${name}" queued for deployment.`,
   });
 
-  if (isAgentConnected(id)) {
-    sendCommand(id, {
-      type: "deploy_game_server",
-      gameServer: {
-        id: server.id,
-        name: server.name,
-        gameId: server.gameId,
-        steamAppId: game.steamAppId,
-        port: server.port,
-        startupCommand: game.startupCommand,
-      },
-    });
-  } else {
+  const delivered = await dispatchCommand(id, {
+    type: "deploy_game_server",
+    gameServer: {
+      id: server.id,
+      name: server.name,
+      gameId: server.gameId,
+      steamAppId: game.steamAppId,
+      port: server.port,
+      startupCommand: game.startupCommand,
+    },
+  });
+  if (!delivered) {
     await db.insert(gameServerLogs).values({
       gameServerId: server.id,
       source: "system",

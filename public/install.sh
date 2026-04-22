@@ -45,7 +45,7 @@ export DEBIAN_FRONTEND=noninteractive
 
 # --- Dependencies -----------------------------------------------------------
 
-say "Installing base packages (curl, ca-certificates, gnupg)"
+say "Installing base packages (curl, ca-certificates, gnupg, sudo, ufw, fail2ban, unattended-upgrades)"
 apt-get update -y -qq
 apt-get install -y -qq --no-install-recommends \
   curl \
@@ -54,7 +54,11 @@ apt-get install -y -qq --no-install-recommends \
   gnupg \
   lsb-release \
   software-properties-common \
+  sudo \
   ufw \
+  fail2ban \
+  unattended-upgrades \
+  apt-listchanges \
   || die "Failed to install base packages."
 
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -v | sed -E 's/v([0-9]+).*/\1/')" -lt 18 ]]; then
@@ -192,8 +196,8 @@ systemctl enable --now gameserveros-agent.service \
 # --- UFW firewall -----------------------------------------------------------
 
 if command -v ufw >/dev/null 2>&1; then
-  if ! ufw status | grep -q "Status: active"; then
-    say "Enabling ufw firewall"
+  if ! ufw status 2>/dev/null | grep -q "Status: active"; then
+    say "Enabling ufw firewall (deny incoming, allow outgoing, allow SSH)"
     ufw --force default deny incoming >/dev/null
     ufw --force default allow outgoing >/dev/null
     ufw allow OpenSSH >/dev/null 2>&1 || ufw allow 22/tcp >/dev/null
@@ -201,9 +205,86 @@ if command -v ufw >/dev/null 2>&1; then
   fi
 fi
 
+# --- fail2ban (SSH brute-force protection) ----------------------------------
+
+if command -v fail2ban-client >/dev/null 2>&1; then
+  if [[ ! -f /etc/fail2ban/jail.d/gameserveros.conf ]]; then
+    say "Configuring fail2ban for SSH"
+    cat > /etc/fail2ban/jail.d/gameserveros.conf <<'JAIL'
+[DEFAULT]
+# After 5 failed auth attempts within 10 minutes, ban the IP for 1 hour.
+findtime = 10m
+bantime  = 1h
+maxretry = 5
+
+[sshd]
+enabled = true
+JAIL
+    systemctl enable --now fail2ban.service >/dev/null 2>&1 \
+      || warn "Could not enable fail2ban. Start it manually with: systemctl start fail2ban"
+  fi
+fi
+
+# --- Unattended security upgrades -------------------------------------------
+
+if [[ -f /etc/apt/apt.conf.d/50unattended-upgrades ]]; then
+  if [[ ! -f /etc/apt/apt.conf.d/20auto-upgrades ]]; then
+    say "Enabling unattended security updates"
+    cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CFG'
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+CFG
+  fi
+fi
+
+# --- Kernel network hardening (sysctl) --------------------------------------
+
+SYSCTL_FILE=/etc/sysctl.d/99-gameserveros-hardening.conf
+if [[ ! -f "${SYSCTL_FILE}" ]]; then
+  say "Applying kernel network hardening sysctls"
+  cat > "${SYSCTL_FILE}" <<'SYSCTL'
+# Reject SYN flood with cookies.
+net.ipv4.tcp_syncookies = 1
+
+# Strict reverse-path filtering (drops packets with spoofed source IPs).
+net.ipv4.conf.all.rp_filter = 1
+net.ipv4.conf.default.rp_filter = 1
+
+# Don't accept ICMP redirects (MITM protection).
+net.ipv4.conf.all.accept_redirects = 0
+net.ipv4.conf.default.accept_redirects = 0
+net.ipv6.conf.all.accept_redirects = 0
+net.ipv6.conf.default.accept_redirects = 0
+
+# Don't send ICMP redirects.
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+
+# Drop source-routed packets (prevents routing bypass attacks).
+net.ipv4.conf.all.accept_source_route = 0
+net.ipv4.conf.default.accept_source_route = 0
+net.ipv6.conf.all.accept_source_route = 0
+net.ipv6.conf.default.accept_source_route = 0
+
+# Log packets with impossible source addresses.
+net.ipv4.conf.all.log_martians = 1
+
+# Ignore broadcast ICMP echo requests.
+net.ipv4.icmp_echo_ignore_broadcasts = 1
+
+# Ignore bogus ICMP responses.
+net.ipv4.icmp_ignore_bogus_error_responses = 1
+SYSCTL
+  sysctl -p "${SYSCTL_FILE}" >/dev/null 2>&1 || true
+fi
+
 say "Installation complete. The agent should appear in your dashboard within 30 seconds."
 printf "\n"
-printf "  Service:   systemctl status gameserveros-agent\n"
-printf "  Logs:      journalctl -u gameserveros-agent -f\n"
-printf "  Config:    %s\n" "${CONFIG_FILE}"
+printf "  Service:     systemctl status gameserveros-agent\n"
+printf "  Logs:        journalctl -u gameserveros-agent -f\n"
+printf "  Config:      %s\n" "${CONFIG_FILE}"
+printf "  Firewall:    ufw status\n"
+printf "  Fail2ban:    fail2ban-client status sshd\n"
+printf "  Auto-update: unattended-upgrades --dry-run\n"
 printf "\n"

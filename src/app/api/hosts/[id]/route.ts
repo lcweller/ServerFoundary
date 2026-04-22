@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { hosts } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { computeStatus } from "@/lib/hosts";
-import { sendCommand } from "@/lib/agent-hub";
+import { dispatchCommand } from "@/lib/agent-hub";
 
 export async function GET(
   _req: NextRequest,
@@ -64,7 +64,7 @@ export async function DELETE(
 
   // Best-effort notify the agent that it's being removed.
   try {
-    sendCommand(id, { type: "host_removed" });
+    await dispatchCommand(id, { type: "host_removed" });
   } catch {}
 
   const result = await db

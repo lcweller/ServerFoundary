@@ -38,22 +38,57 @@ export async function createSession(userId: string): Promise<string> {
   return token;
 }
 
+function deriveCookieDomain(): string | undefined {
+  // Explicit env var wins. Should be ".example.com" (with the leading dot)
+  // if you want the cookie to be valid across subdomains.
+  if (process.env.SESSION_COOKIE_DOMAIN) {
+    return process.env.SESSION_COOKIE_DOMAIN;
+  }
+  // Auto-derive from the public app and WS URLs: if both share a common
+  // parent domain, use that so the browser sends the session cookie to
+  // wss://game-ws.example.com when it was set for https://game.example.com.
+  const appHost = safeHost(process.env.NEXT_PUBLIC_APP_URL);
+  const wsHost = safeHost(process.env.NEXT_PUBLIC_AGENT_WS_URL);
+  if (!appHost || !wsHost || appHost === wsHost) return undefined;
+  const appParts = appHost.split(".");
+  const wsParts = wsHost.split(".");
+  // Walk from the right, collecting shared labels.
+  const shared: string[] = [];
+  for (let i = 1; i <= Math.min(appParts.length, wsParts.length); i++) {
+    const a = appParts[appParts.length - i];
+    const b = wsParts[wsParts.length - i];
+    if (a === b) shared.unshift(a);
+    else break;
+  }
+  if (shared.length >= 2) return "." + shared.join(".");
+  return undefined;
+}
+
+function safeHost(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
 export async function setSessionCookie(token: string) {
   const cookieStore = await cookies();
+  const domain = deriveCookieDomain();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
     // Only mark Secure when the deployment is actually served over HTTPS.
     // Self-hosted LAN installs (e.g., http://192.168.x.y:3000) would otherwise
     // have the cookie silently dropped by the browser and auth would appear
-    // to do nothing. Enable by setting SESSION_COOKIE_SECURE=true, or by
-    // putting the app behind an HTTPS reverse proxy and ensuring
-    // NEXT_PUBLIC_APP_URL uses https://.
+    // to do nothing.
     secure:
       process.env.SESSION_COOKIE_SECURE === "true" ||
       (process.env.NEXT_PUBLIC_APP_URL ?? "").startsWith("https://"),
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_DURATION_DAYS * 24 * 60 * 60,
+    ...(domain ? { domain } : {}),
   });
 }
 

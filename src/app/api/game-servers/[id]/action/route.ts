@@ -3,7 +3,8 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { gameServers, gameServerLogs } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { sendCommand, isAgentConnected } from "@/lib/agent-hub";
+import { dispatchCommand } from "@/lib/agent-hub";
+import { isHostOnline } from "@/lib/hosts";
 
 const ALLOWED = new Set(["start", "stop", "restart"]);
 
@@ -34,14 +35,14 @@ export async function POST(
     .limit(1);
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  if (!isAgentConnected(server.hostId)) {
+  if (!(await isHostOnline(server.hostId))) {
     return NextResponse.json(
       { error: "Host agent is offline." },
       { status: 409 },
     );
   }
 
-  sendCommand(server.hostId, {
+  await dispatchCommand(server.hostId, {
     type: `${action}_game_server`,
     gameServerId: id,
   });

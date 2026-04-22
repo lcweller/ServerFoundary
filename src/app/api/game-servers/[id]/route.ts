@@ -3,7 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
-import { sendCommand } from "@/lib/agent-hub";
+import { dispatchCommand } from "@/lib/agent-hub";
 
 export async function DELETE(
   _req: NextRequest,
@@ -20,7 +20,7 @@ export async function DELETE(
     .limit(1);
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  sendCommand(server.hostId, {
+  await dispatchCommand(server.hostId, {
     type: "delete_game_server",
     gameServerId: id,
   });

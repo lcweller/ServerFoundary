@@ -4,6 +4,22 @@ import { hosts, type Host } from "@/db/schema";
 
 export const HEARTBEAT_STALE_MS = 30_000;
 
+/**
+ * Cross-process "is the agent connected" check. The ws-server updates
+ * last_heartbeat_at on every heartbeat (every 10s); if we've seen one
+ * within HEARTBEAT_STALE_MS the agent is online — regardless of which
+ * process we're answering from.
+ */
+export async function isHostOnline(hostId: string): Promise<boolean> {
+  const [row] = await db
+    .select({ lastHeartbeatAt: hosts.lastHeartbeatAt })
+    .from(hosts)
+    .where(eq(hosts.id, hostId))
+    .limit(1);
+  if (!row?.lastHeartbeatAt) return false;
+  return Date.now() - row.lastHeartbeatAt.getTime() <= HEARTBEAT_STALE_MS;
+}
+
 export type Metrics = {
   cpu?: { model?: string; cores?: number; usage?: number; temp?: number | null };
   memory?: { total_gb?: number; used_gb?: number };
