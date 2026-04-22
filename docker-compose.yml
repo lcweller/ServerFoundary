@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: gameserveros-postgres
+    container_name: serverfoundary-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: gameserveros
@@ -15,7 +15,25 @@ services:
       test: ["CMD-SHELL", "pg_isready -U gameserveros"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
+  app:
+    # Build locally. To use the pre-built image instead, comment this out and
+    # uncomment the `image:` line below.
+    build: .
+    # image: ghcr.io/lcweller/serverfoundary:latest
+    container_name: serverfoundary
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://gameserveros:gameserveros@postgres:5432/gameserveros
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NEXT_PUBLIC_AGENT_WS_URL: ${NEXT_PUBLIC_AGENT_WS_URL:-ws://localhost:3001}
+    ports:
+      - "3000:3000"
+      - "3001:3001"
 
 volumes:
   postgres_data:

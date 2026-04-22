@@ -91,3 +91,59 @@ Paste it on a fresh Ubuntu 22.04 / 24.04 server. The script:
 
 This is the v0.1 — the scope defined in the original spec. Not yet built:
 backups, notifications, self-update, AppArmor, ISO builder.
+
+## Deployment
+
+### Docker Compose (simplest)
+
+```bash
+cp .env.example .env            # edit NEXT_PUBLIC_APP_URL if needed
+docker compose up -d            # brings up Postgres + dashboard + WS
+docker compose exec app npx drizzle-kit push   # apply schema
+docker compose exec app node -e "require('./src/db/seed.ts')" || \
+  docker compose exec app npx tsx src/db/seed.ts
+```
+
+Dashboard on http://localhost:3000, WebSocket on `:3001`.
+
+### Unraid
+
+This repo publishes a Docker image to GitHub Container Registry every time
+`main` advances: `ghcr.io/lcweller/serverfoundary:latest`.
+
+1. In Unraid, go to **Docker** → **Add Container**.
+2. Under **Template** paste:
+   `https://raw.githubusercontent.com/lcweller/ServerFoundary/main/unraid/serverfoundary.xml`
+3. Fill in:
+   - **Database URL** — a Postgres connection string. Spin up the official
+     `postgres:16` container first (see the Postgres community template), or
+     point at an existing database.
+   - **Public App URL** — `http://<your-unraid-ip>:3000`
+   - **Public Agent WS URL** — `ws://<your-unraid-ip>:3001`
+4. Apply. Unraid pulls the image and starts both services in one container.
+
+**First run only**, exec into the container once to apply migrations and seed:
+
+```bash
+docker exec -it ServerFoundary sh -c "cd /app && npx drizzle-kit push && npx tsx src/db/seed.ts"
+```
+
+(That requires dev deps temporarily — alternative: run migrations from any
+workstation pointed at the same Postgres with `npm run db:migrate && npm run db:seed`.)
+
+### Vocabulary cheat sheet
+
+- **Dockerfile** — recipe for building an image.
+- **Docker image** — the built artifact. Stored in a **container registry**.
+- **`docker build`** — the build step that turns a Dockerfile into an image.
+- **`docker pull`** — fetch an image from a registry (what Unraid does).
+- **GitHub Container Registry (GHCR)** — a free registry tied to GitHub. Our
+  workflow publishes to `ghcr.io/<owner>/<repo>`.
+- **GitHub Actions** — the CI service that runs the `docker build` + push
+  every time you push to `main`. See `.github/workflows/docker-publish.yml`.
+- **Unraid template (XML)** — metadata Unraid reads to know which image to
+  pull, which ports to expose, and which env vars to prompt for.
+
+Unraid itself never compiles source. GitHub Actions does the build; Unraid
+pulls the finished image.
+

@@ -1,0 +1,15 @@
+node_modules
+.next
+.git
+.gitignore
+.github
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.DS_Store
+dist
+*.tsbuildinfo
+ServerFoundary.zip
+README.md
+unraid
