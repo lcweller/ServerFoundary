@@ -100,14 +100,33 @@ install_steamcmd_manual() {
   return 0
 }
 
-if ! command -v steamcmd >/dev/null 2>&1; then
+# Ensure a `steamcmd` binary exists on /usr/local/bin (which is on systemd's
+# default PATH) regardless of where apt/Valve put the real one.
+link_steamcmd() {
+  if [[ -x /usr/local/bin/steamcmd ]]; then
+    return 0
+  fi
+  for candidate in \
+    /usr/games/steamcmd \
+    /usr/bin/steamcmd \
+    /opt/steamcmd/steamcmd.sh; do
+    if [[ -x "${candidate}" ]]; then
+      ln -sf "${candidate}" /usr/local/bin/steamcmd
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! link_steamcmd; then
   say "Installing SteamCMD"
   if ! install_steamcmd_package; then
     warn "Package install failed; falling back to manual."
     install_steamcmd_manual || warn "SteamCMD install failed. Game servers won't be able to download until this is fixed."
   fi
+  link_steamcmd || warn "SteamCMD installed but not found in any known location; game servers will fail to deploy."
 else
-  say "SteamCMD already installed"
+  say "SteamCMD already installed at $(readlink -f /usr/local/bin/steamcmd)"
 fi
 
 # --- User and directories ---------------------------------------------------
@@ -179,6 +198,7 @@ User=${AGENT_USER}
 EnvironmentFile=${CONFIG_FILE}
 Environment=GAMESERVEROS_CONFIG=${CONFIG_FILE}
 Environment=GAMESERVEROS_SERVERS_DIR=${SERVERS_DIR}
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games
 ExecStart=$(command -v node) ${AGENT_BIN}
 Restart=on-failure
 RestartSec=5
