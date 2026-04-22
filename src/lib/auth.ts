@@ -42,7 +42,15 @@ export async function setSessionCookie(token: string) {
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    // Only mark Secure when the deployment is actually served over HTTPS.
+    // Self-hosted LAN installs (e.g., http://192.168.x.y:3000) would otherwise
+    // have the cookie silently dropped by the browser and auth would appear
+    // to do nothing. Enable by setting SESSION_COOKIE_SECURE=true, or by
+    // putting the app behind an HTTPS reverse proxy and ensuring
+    // NEXT_PUBLIC_APP_URL uses https://.
+    secure:
+      process.env.SESSION_COOKIE_SECURE === "true" ||
+      (process.env.NEXT_PUBLIC_APP_URL ?? "").startsWith("https://"),
     sameSite: "lax",
     path: "/",
     maxAge: SESSION_DURATION_DAYS * 24 * 60 * 60,
