@@ -116,6 +116,7 @@ fi
 
 mkdir -p "${AGENT_BIN_DIR}" "${SERVERS_DIR}" "${CONFIG_DIR}"
 chown -R "${AGENT_USER}:${AGENT_USER}" "${AGENT_HOME}"
+chown -R "${AGENT_USER}:${AGENT_USER}" "${CONFIG_DIR}"
 chmod 750 "${CONFIG_DIR}"
 
 # --- Download the agent -----------------------------------------------------
