@@ -1,7 +1,9 @@
-#!/bin/sh
+#!/bin/bash
 # Run both Next.js and the WebSocket server in one container.
 # tini (as PID 1 via the Dockerfile ENTRYPOINT) forwards signals to us,
 # and we forward them on to both children.
+#
+# Uses bash specifically for `wait -n`, which dash (Debian's /bin/sh) lacks.
 
 set -eu
 
