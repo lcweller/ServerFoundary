@@ -32,15 +32,29 @@ COPY . .
 # Build Next.js + the agent bundle (public/agent.cjs).
 RUN npm run build
 
-# Bundle the standalone WebSocket server so the runtime image can run it
-# with plain `node` (no tsx/typescript at runtime).
+# Bundle the standalone WebSocket server and a migrate-and-seed CLI so the
+# runtime image can run them with plain `node` (no tsx/typescript needed).
 RUN npx esbuild ws-server.ts \
       --bundle \
       --platform=node \
       --target=node18 \
       --format=cjs \
       --packages=external \
-      --outfile=dist/ws-server.cjs
+      --outfile=dist/ws-server.cjs \
+ && npx esbuild src/db/migrate.ts \
+      --bundle \
+      --platform=node \
+      --target=node18 \
+      --format=cjs \
+      --packages=external \
+      --outfile=dist/migrate.cjs \
+ && npx esbuild src/db/seed.ts \
+      --bundle \
+      --platform=node \
+      --target=node18 \
+      --format=cjs \
+      --packages=external \
+      --outfile=dist/seed.cjs
 
 # Drop dev deps from node_modules so the runtime image stays small.
 RUN npm prune --omit=dev
@@ -67,6 +81,8 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.mjs ./next.config.mjs
+# SQL migrations read at runtime by dist/migrate.cjs via drizzle-orm.
+COPY --from=builder /app/src/db/migrations ./src/db/migrations
 
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint

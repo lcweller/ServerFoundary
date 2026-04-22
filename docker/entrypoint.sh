@@ -5,6 +5,22 @@
 
 set -eu
 
+: "${MIGRATE_ON_START:=true}"
+: "${SEED_ON_START:=true}"
+
+if [ "${MIGRATE_ON_START}" = "true" ] && [ -n "${DATABASE_URL:-}" ]; then
+  echo "[entrypoint] running database migrations..."
+  node dist/migrate.cjs || {
+    echo "[entrypoint] migrations failed. Check DATABASE_URL is reachable and has the right credentials."
+    exit 1
+  }
+fi
+
+if [ "${SEED_ON_START}" = "true" ] && [ -n "${DATABASE_URL:-}" ]; then
+  echo "[entrypoint] seeding supported_games catalog..."
+  node dist/seed.cjs || echo "[entrypoint] seed failed (non-fatal); continuing."
+fi
+
 node dist/ws-server.cjs &
 WS_PID=$!
 
