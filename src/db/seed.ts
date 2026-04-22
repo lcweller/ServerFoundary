@@ -1,7 +1,13 @@
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
+import { notInArray } from "drizzle-orm";
 import { supportedGames } from "./schema";
 
+// Only games whose dedicated-server Steam app allows anonymous SteamCMD
+// login are listed here. 7 Days to Die (294420), CS2 (730), etc. require a
+// paid Steam account to download and will fail with "Missing configuration"
+// if the agent tries to pull them anonymously. Rust and other anonymous
+// server apps can be added later.
 const games = [
   {
     id: "valheim",
@@ -15,17 +21,6 @@ const games = [
       "Viking survival co-op. Explore a procedurally generated world with up to 10 friends.",
   },
   {
-    id: "cs2",
-    name: "Counter-Strike 2",
-    steamAppId: 730,
-    defaultPort: 27015,
-    defaultMaxPlayers: 32,
-    startupCommand:
-      "./game/bin/linuxsteamrt64/cs2 -dedicated +map de_dust2 -port {PORT}",
-    description:
-      "Competitive tactical FPS. Host a private server for scrims, casual play, or community events.",
-  },
-  {
     id: "project_zomboid",
     name: "Project Zomboid",
     steamAppId: 380870,
@@ -36,25 +31,26 @@ const games = [
       "Isometric zombie apocalypse survival sandbox. Build, loot, and survive together.",
   },
   {
-    id: "seven_days_to_die",
-    name: "7 Days to Die",
-    steamAppId: 294420,
-    defaultPort: 26900,
-    defaultMaxPlayers: 8,
+    id: "rust",
+    name: "Rust",
+    steamAppId: 258550,
+    defaultPort: 28015,
+    defaultMaxPlayers: 50,
     startupCommand:
-      "./7DaysToDieServer.x86_64 -configfile=serverconfig.xml -port {PORT}",
+      "./RustDedicated -batchmode +server.port {PORT} +server.hostname \"{SERVER_NAME}\" +server.maxplayers 50",
     description:
-      "Open-world survival horror with tower defense elements. Every 7 nights, the horde comes.",
+      "Hardcore multiplayer survival. Gather resources, build bases, and try not to get raided.",
   },
   {
-    id: "terraria",
-    name: "Terraria",
-    steamAppId: 105600,
-    defaultPort: 7777,
-    defaultMaxPlayers: 8,
-    startupCommand: "./TerrariaServer.bin.x86_64 -port {PORT} -world world.wld",
+    id: "csgo",
+    name: "Counter-Strike: Global Offensive",
+    steamAppId: 740,
+    defaultPort: 27015,
+    defaultMaxPlayers: 32,
+    startupCommand:
+      "./srcds_run -game csgo -console -usercon +game_type 0 +game_mode 1 +mapgroup mg_active +map de_dust2 -port {PORT}",
     description:
-      "2D sandbox adventure with crafting, exploration, and boss battles.",
+      "Classic competitive FPS. CS:GO dedicated server (pre-CS2) is still free-anonymous and perfect for a private lobby.",
   },
 ];
 
@@ -67,6 +63,19 @@ async function main() {
   const db = drizzle(client);
 
   console.log("Seeding supported games...");
+  const keepIds = games.map((g) => g.id);
+  // Remove entries no longer in the list (e.g., games that dropped anon
+  // downloads). game_servers.gameId is plain text, not a FK, so existing
+  // server rows keep working.
+  const removed = await db
+    .delete(supportedGames)
+    .where(notInArray(supportedGames.id, keepIds))
+    .returning({ id: supportedGames.id });
+  if (removed.length > 0) {
+    console.log(
+      `Removed ${removed.length} stale games: ${removed.map((r) => r.id).join(", ")}`,
+    );
+  }
   for (const game of games) {
     await db
       .insert(supportedGames)

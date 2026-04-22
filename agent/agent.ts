@@ -657,10 +657,24 @@ class AgentConnection {
 
   private openTerminal(sessionId: string) {
     if (this.terminals.has(sessionId)) return;
-    const proc = spawn("/bin/bash", ["-i"], {
-      env: { ...process.env, TERM: "xterm-256color" },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
+    // Use `script` (from util-linux, preinstalled on every Linux distro)
+    // to give bash a real pseudo-terminal. Without this, interactive bash
+    // whines "cannot set terminal process group" and has no job control.
+    // -q: quiet   -f: flush each write   -e: propagate child exit code
+    // -c: run the given command           /dev/null: don't record typescript
+    const proc = spawn(
+      "script",
+      ["-qfec", "/bin/bash --login -i", "/dev/null"],
+      {
+        env: {
+          ...process.env,
+          TERM: "xterm-256color",
+          LANG: process.env.LANG ?? "C.UTF-8",
+          LC_ALL: process.env.LC_ALL ?? "C.UTF-8",
+        },
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
     proc.stdout?.setEncoding("utf8");
     proc.stderr?.setEncoding("utf8");
     const forward = (data: string) => {
