@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Copy, Loader2, RotateCw, Server } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { HxCard } from "@/components/hex/card";
+import { HxButton } from "@/components/hex/button";
+import { HxBadge } from "@/components/hex/badge";
+import { HxIcon } from "@/components/hex/icons";
 
 type CreatedHost = {
   hostId: string;
@@ -15,7 +14,8 @@ type CreatedHost = {
 };
 
 export function AddHostFlow({ baseUrl }: { baseUrl: string }) {
-  const [name, setName] = useState("My Game Server");
+  const [step, setStep] = useState<0 | 1 | 2>(0);
+  const [name, setName] = useState("My game server");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedHost | null>(null);
@@ -27,8 +27,7 @@ export function AddHostFlow({ baseUrl }: { baseUrl: string }) {
         ? window.location.origin
         : "";
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
+  async function createHost() {
     setCreating(true);
     setError(null);
     try {
@@ -50,6 +49,7 @@ export function AddHostFlow({ baseUrl }: { baseUrl: string }) {
         token: data.enrollmentToken,
         command,
       });
+      setStep(1);
       setCreating(false);
     } catch {
       setError("Couldn't reach the server.");
@@ -57,71 +57,324 @@ export function AddHostFlow({ baseUrl }: { baseUrl: string }) {
     }
   }
 
-  if (created) {
-    return (
-      <InstallStep
-        hostId={created.hostId}
-        command={created.command}
-        onRegenerate={async () => {
-          setCreated(null);
-          setError(null);
-        }}
-      />
-    );
-  }
-
   return (
-    <Card className="max-w-2xl">
-      <CardContent className="p-6">
-        <form onSubmit={submit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="host-name">Host name</Label>
-            <Input
-              id="host-name"
+    <div className="flex flex-col gap-7">
+      <Stepper step={step} />
+
+      {step === 0 && (
+        <HxCard padding={28}>
+          <div className="mb-1 text-[15px] font-medium">Name this host</div>
+          <div className="mb-5 text-[13px] text-[var(--hx-muted-fg)]">
+            Just a label so you can tell your hosts apart later. You can change
+            it any time.
+          </div>
+          <div className="mb-4 grid gap-3" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <MethodCard
+              iconName="terminal"
+              title="Existing Linux box"
+              desc="Paste a one-liner on Debian, Ubuntu, or any systemd host. Installs the gameserveros-agent in place."
+              badges={["Debian 12", "Ubuntu 22.04+"]}
+              selected
+            />
+            <MethodCard
+              iconName="download"
+              title="Fresh install — GameServerOS"
+              desc="Coming soon. A hybrid ISO that auto-pairs on first boot."
+              badges={["Soon"]}
+              disabled
+            />
+          </div>
+
+          <div className="mb-6">
+            <div className="mb-1.5 hx-mono-tag text-[var(--hx-muted-fg)]">
+              Host name
+            </div>
+            <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="My Game Server"
-              disabled={creating}
-              required
-              maxLength={80}
+              placeholder="My game server"
+              className="h-10 w-full rounded-lg border px-3 text-[13.5px]"
+              style={{
+                background: "var(--hx-bg)",
+                borderColor: "var(--hx-border)",
+                color: "var(--hx-fg)",
+              }}
             />
-            <p className="text-xs text-muted-foreground">
-              Just a label so you can tell your hosts apart. You can change it later.
-            </p>
           </div>
+
           {error && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div
+              className="mb-4 rounded-lg border px-3 py-2 text-[12.5px]"
+              style={{
+                background:
+                  "color-mix(in oklch, var(--hx-err) 10%, transparent)",
+                borderColor:
+                  "color-mix(in oklch, var(--hx-err) 30%, transparent)",
+                color: "var(--hx-err)",
+              }}
+            >
               {error}
             </div>
           )}
-          <Button type="submit" disabled={creating}>
-            {creating && <Loader2 className="h-4 w-4 animate-spin" />}
-            Create host
-          </Button>
-        </form>
-      </CardContent>
-    </Card>
+
+          <div className="flex justify-end">
+            <HxButton
+              variant="primary"
+              iconRight="arrowRight"
+              onClick={createHost}
+              disabled={creating || !name.trim()}
+            >
+              Generate pair code
+            </HxButton>
+          </div>
+        </HxCard>
+      )}
+
+      {step === 1 && created && (
+        <CommandStep
+          command={created.command}
+          hostId={created.hostId}
+          onBack={() => {
+            setStep(0);
+            setCreated(null);
+          }}
+          onContinue={() => setStep(2)}
+        />
+      )}
+
+      {step === 2 && created && <WaitingStep hostId={created.hostId} />}
+    </div>
   );
 }
 
-function InstallStep({
-  hostId,
-  command,
-  onRegenerate,
-}: {
-  hostId: string;
-  command: string;
-  onRegenerate: () => void;
-}) {
-  const router = useRouter();
-  const [copied, setCopied] = useState(false);
-  const [status, setStatus] = useState<"waiting" | "connected" | "expired">(
-    "waiting",
+function Stepper({ step }: { step: number }) {
+  const labels = ["Choose host", "Pair code", "Waiting"];
+  return (
+    <div className="flex gap-4">
+      {labels.map((l, i) => (
+        <div key={i} className="flex flex-1 items-center gap-2.5">
+          <div
+            className="flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full font-mono text-[11px] font-semibold"
+            style={{
+              width: 22,
+              height: 22,
+              background:
+                i < step
+                  ? "var(--hx-fg)"
+                  : i === step
+                    ? "var(--hx-accent)"
+                    : "var(--hx-chip)",
+              color:
+                i === step
+                  ? "#0a1a10"
+                  : i < step
+                    ? "var(--hx-bg)"
+                    : "var(--hx-muted-fg)",
+            }}
+          >
+            {i < step ? <HxIcon.check size={12} /> : i + 1}
+          </div>
+          <div
+            className="text-[12.5px]"
+            style={{
+              color: i <= step ? "var(--hx-fg)" : "var(--hx-muted-fg)",
+              fontWeight: i === step ? 500 : 400,
+            }}
+          >
+            {l}
+          </div>
+          {i < labels.length - 1 && (
+            <div
+              className="h-px flex-1"
+              style={{ background: "var(--hx-border)" }}
+            />
+          )}
+        </div>
+      ))}
+    </div>
   );
+}
+
+function MethodCard({
+  iconName,
+  title,
+  desc,
+  badges,
+  selected,
+  disabled,
+}: {
+  iconName: keyof typeof HxIcon;
+  title: string;
+  desc: string;
+  badges: string[];
+  selected?: boolean;
+  disabled?: boolean;
+}) {
+  const Icon = HxIcon[iconName];
+  return (
+    <div
+      className="rounded-xl border p-5"
+      style={{
+        background: "var(--hx-bg)",
+        borderColor: selected ? "var(--hx-fg)" : "var(--hx-border)",
+        borderWidth: selected ? 1.5 : 1,
+        opacity: disabled ? 0.55 : 1,
+      }}
+    >
+      <div
+        className="mb-3.5 flex h-[34px] w-[34px] items-center justify-center rounded-lg"
+        style={{ background: "var(--hx-chip)" }}
+      >
+        <Icon size={18} />
+      </div>
+      <div className="mb-1.5 text-[14px] font-medium">{title}</div>
+      <div className="mb-3 text-[12.5px] leading-[1.5] text-[var(--hx-muted-fg)]">
+        {desc}
+      </div>
+      <div className="flex gap-1.5">
+        {badges.map((b) => (
+          <HxBadge key={b} size="sm">
+            {b}
+          </HxBadge>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CommandStep({
+  command,
+  hostId,
+  onBack,
+  onContinue,
+}: {
+  command: string;
+  hostId: string;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+  // Derive a cosmetic 8-char pair code from the token in the command so it
+  // looks like Hexmesh's pairing block. (The token itself stays in the
+  // command for functional correctness.)
+  const token = command.split(" ").slice(-1)[0] ?? "";
+  const cellChars = token
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, "")
+    .slice(0, 8)
+    .padEnd(8, "0");
+  void hostId;
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {}
+  }
+
+  return (
+    <HxCard padding={28}>
+      <div className="mb-1 text-[15px] font-medium">Your pairing code</div>
+      <div className="mb-6 text-[13px] text-[var(--hx-muted-fg)]">
+        Single-use, expires in 1 hour. Rotate any time by regenerating.
+      </div>
+
+      <div className="mb-7 flex items-center justify-center gap-2.5">
+        {cellChars
+          .slice(0, 4)
+          .split("")
+          .map((ch, i) => (
+            <CodeCell key={`a${i}`} ch={ch} />
+          ))}
+        <div
+          className="self-center font-mono text-[24px]"
+          style={{ color: "var(--hx-border-strong)" }}
+        >
+          −
+        </div>
+        {cellChars
+          .slice(4, 8)
+          .split("")
+          .map((ch, i) => (
+            <CodeCell key={`b${i}`} ch={ch} />
+          ))}
+      </div>
+
+      <div>
+        <div className="mb-2 hx-mono-tag text-[var(--hx-muted-fg)]">
+          Run on the host
+        </div>
+        <div
+          className="flex items-start gap-2.5 rounded-xl p-4 font-mono text-[13px] leading-[1.6]"
+          style={{ background: "var(--hx-fg)", color: "var(--hx-bg)" }}
+        >
+          <span className="shrink-0" style={{ color: "var(--hx-accent)" }}>
+            $
+          </span>
+          <div className="flex-1 break-all">{command}</div>
+          <button
+            onClick={copy}
+            className="flex shrink-0 items-center gap-1 rounded border px-2 py-1 font-sans text-[11px]"
+            style={{
+              background: "color-mix(in oklch, var(--hx-bg) 10%, transparent)",
+              borderColor:
+                "color-mix(in oklch, var(--hx-bg) 15%, transparent)",
+              color: "var(--hx-bg)",
+            }}
+          >
+            {copied ? <HxIcon.check size={11} /> : <HxIcon.copy size={11} />}
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-6 flex justify-between">
+        <HxButton variant="ghost" icon="arrowLeft" onClick={onBack}>
+          Back
+        </HxButton>
+        <HxButton variant="primary" iconRight="arrowRight" onClick={onContinue}>
+          I&apos;ve run the command
+        </HxButton>
+      </div>
+    </HxCard>
+  );
+}
+
+function CodeCell({ ch }: { ch: string }) {
+  return (
+    <div
+      className="flex items-center justify-center rounded-[10px] border font-mono"
+      style={{
+        width: 52,
+        height: 64,
+        background: "var(--hx-bg)",
+        borderColor: "var(--hx-border)",
+        fontSize: 32,
+        fontWeight: 500,
+        letterSpacing: "-0.02em",
+        color: "var(--hx-fg)",
+      }}
+    >
+      {ch}
+    </div>
+  );
+}
+
+function WaitingStep({ hostId }: { hostId: string }) {
+  const router = useRouter();
+  const [status, setStatus] = useState<"waiting" | "connected">("waiting");
+  const [progress, setProgress] = useState<0 | 1 | 2 | 3 | 4>(0);
 
   useEffect(() => {
     let cancelled = false;
-    let attempts = 0;
+    let stage: typeof progress = 0;
+    const stageTimer = setInterval(() => {
+      if (stage < 3) {
+        stage = (stage + 1) as typeof progress;
+        setProgress(stage);
+      }
+    }, 1200);
 
     async function poll() {
       if (cancelled) return;
@@ -131,131 +384,141 @@ function InstallStep({
         });
         if (res.ok) {
           const data = await res.json();
-          if (data.status === "online") {
+          if (data.status === "online" || data.enrolled) {
+            setProgress(4);
             setStatus("connected");
-            return;
-          }
-          if (data.enrolled) {
-            setStatus("connected");
+            clearInterval(stageTimer);
             return;
           }
         }
       } catch {}
-      attempts++;
-      if (attempts > 720) {
-        setStatus("expired");
-        return;
-      }
-      setTimeout(poll, 3000);
+      setTimeout(poll, 2500);
     }
-
     poll();
     return () => {
       cancelled = true;
+      clearInterval(stageTimer);
     };
   }, [hostId]);
 
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(command);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {}
+  const stages = [
+    "Fetching installer",
+    "Installing dependencies",
+    "Enrolling agent",
+    "Trusting host fingerprint",
+    "Host fingerprint trusted",
+  ];
+
+  if (status === "connected") {
+    return (
+      <HxCard padding={36}>
+        <div className="text-center">
+          <div
+            className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl"
+            style={{
+              background:
+                "color-mix(in oklch, var(--hx-accent) 15%, transparent)",
+              color: "var(--hx-accent-fg)",
+            }}
+          >
+            <HxIcon.check size={30} />
+          </div>
+          <div
+            className="text-[22px] font-medium"
+            style={{ letterSpacing: "-0.02em" }}
+          >
+            Host online.
+          </div>
+          <div className="mt-1.5 text-[14px] text-[var(--hx-muted-fg)]">
+            Your host is now paired with the mesh.
+          </div>
+        </div>
+        <div className="mt-7 flex justify-end gap-2.5">
+          <HxButton
+            variant="secondary"
+            onClick={() => router.push(`/dashboard/hosts/${hostId}`)}
+          >
+            View host
+          </HxButton>
+          <HxButton
+            variant="primary"
+            iconRight="arrowRight"
+            onClick={() => router.push(`/dashboard/hosts/${hostId}`)}
+          >
+            Deploy a game server
+          </HxButton>
+        </div>
+      </HxCard>
+    );
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
-      <Card>
-        <CardContent className="p-6">
-          <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/20 text-xs text-primary">
-              1
-            </div>
-            Run this on your Linux server
-          </div>
-          <p className="mb-4 text-sm text-muted-foreground">
-            Open a terminal on the server you want to link. Paste this command
-            and press Enter. The installer will set up everything automatically.
-          </p>
-          <div className="relative">
-            <pre className="scrollbar-thin overflow-x-auto rounded-md border border-border bg-secondary/40 p-4 pr-14 text-xs">
-              <code>{command}</code>
-            </pre>
-            <Button
-              type="button"
-              size="sm"
-              variant="secondary"
-              className="absolute right-2 top-2"
-              onClick={copy}
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3.5 w-3.5" />
-                  Copied
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy
-                </>
-              )}
-            </Button>
-          </div>
-          <p className="mt-3 text-xs text-muted-foreground">
-            This link expires in 1 hour. You can regenerate it if needed.
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="flex items-center justify-between gap-4 p-6">
-          <div className="flex items-center gap-4">
-            <div
-              className={
-                status === "connected"
-                  ? "flex h-10 w-10 items-center justify-center rounded-full bg-success/15 text-success"
-                  : status === "expired"
-                    ? "flex h-10 w-10 items-center justify-center rounded-full bg-destructive/15 text-destructive"
-                    : "flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary"
-              }
-            >
-              {status === "connected" ? (
-                <Check className="h-5 w-5" />
-              ) : status === "expired" ? (
-                <RotateCw className="h-5 w-5" />
-              ) : (
-                <Server className="h-5 w-5 animate-pulse-dot" />
-              )}
-            </div>
-            <div>
-              <div className="font-medium">
-                {status === "connected"
-                  ? "Connected!"
-                  : status === "expired"
-                    ? "This link has expired"
-                    : "Waiting for your server to connect..."}
+    <HxCard padding={36}>
+      <div className="text-center">
+        <div
+          className="relative mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl"
+          style={{ background: "var(--hx-chip)" }}
+        >
+          <div
+            className="absolute animate-hx-spin rounded-[20px] border-2"
+            style={{
+              inset: -4,
+              borderColor: "var(--hx-accent)",
+              borderTopColor: "transparent",
+            }}
+          />
+          <HxIcon.hosts size={26} />
+        </div>
+        <div
+          className="text-[17px] font-medium"
+          style={{ letterSpacing: "-0.01em" }}
+        >
+          Waiting for the host to check in…
+        </div>
+        <div className="mt-1.5 text-[13px] text-[var(--hx-muted-fg)]">
+          Leave this window open while the installer runs on the target
+          machine.
+        </div>
+      </div>
+      <div
+        className="mt-7 rounded-xl border p-5"
+        style={{
+          background: "var(--hx-surface-sunken)",
+          borderColor: "var(--hx-border)",
+        }}
+      >
+        <div className="flex flex-col gap-2.5">
+          {stages.map((s, i) => {
+            const done = progress > i;
+            const active = progress === i;
+            return (
+              <div
+                key={i}
+                className="flex items-center gap-2.5 font-mono text-[13px]"
+                style={{
+                  color:
+                    done || active
+                      ? "var(--hx-fg)"
+                      : "var(--hx-muted-fg)",
+                }}
+              >
+                <span className="inline-flex w-3.5 justify-center">
+                  {done ? (
+                    <span style={{ color: "var(--hx-accent)" }}>
+                      <HxIcon.check size={13} />
+                    </span>
+                  ) : active ? (
+                    <span style={{ color: "var(--hx-accent-2)" }}>●</span>
+                  ) : (
+                    <span style={{ color: "var(--hx-border-strong)" }}>○</span>
+                  )}
+                </span>
+                → {s}
               </div>
-              <div className="text-xs text-muted-foreground">
-                {status === "connected"
-                  ? "Your host has checked in successfully."
-                  : status === "expired"
-                    ? "Generate a new one to try again."
-                    : "This can take a few minutes the first time."}
-              </div>
-            </div>
-          </div>
-          {status === "connected" ? (
-            <Button onClick={() => router.push(`/dashboard/hosts/${hostId}`)}>
-              Go to Host
-            </Button>
-          ) : status === "expired" ? (
-            <Button variant="outline" onClick={onRegenerate}>
-              <RotateCw className="h-4 w-4" />
-              Regenerate
-            </Button>
-          ) : null}
-        </CardContent>
-      </Card>
-    </div>
+            );
+          })}
+        </div>
+      </div>
+    </HxCard>
   );
 }

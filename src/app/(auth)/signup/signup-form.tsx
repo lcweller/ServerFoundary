@@ -2,18 +2,24 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { HxButton } from "@/components/hex/button";
+
+const field = {
+  className: "h-10 w-full rounded-lg border px-3 text-[13.5px] outline-none",
+  style: {
+    background: "var(--hx-bg)",
+    borderColor: "var(--hx-border)",
+    color: "var(--hx-fg)",
+  } as React.CSSProperties,
+};
 
 export function SignupForm() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -40,54 +46,60 @@ export function SignupForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="mt-6 space-y-4">
-      <div className="space-y-2">
-        <Label htmlFor="name">Name</Label>
-        <Input
-          id="name"
-          type="text"
-          autoComplete="name"
-          required
+    <form onSubmit={onSubmit} className="flex flex-col gap-3">
+      <label className="flex flex-col gap-1.5">
+        <span className="hx-mono-tag text-[var(--hx-muted-fg)]">Name</span>
+        <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          disabled={loading}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="email">Email</Label>
-        <Input
-          id="email"
-          type="email"
-          autoComplete="email"
           required
+          autoComplete="name"
+          {...field}
+        />
+      </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="hx-mono-tag text-[var(--hx-muted-fg)]">Email</span>
+        <input
+          type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          disabled={loading}
-        />
-      </div>
-      <div className="space-y-2">
-        <Label htmlFor="password">Password</Label>
-        <Input
-          id="password"
-          type="password"
-          autoComplete="new-password"
           required
-          minLength={8}
+          autoComplete="email"
+          {...field}
+        />
+      </label>
+      <label className="flex flex-col gap-1.5">
+        <span className="hx-mono-tag text-[var(--hx-muted-fg)]">Password</span>
+        <input
+          type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          disabled={loading}
+          required
+          minLength={8}
+          autoComplete="new-password"
+          {...field}
         />
-        <p className="text-xs text-muted-foreground">At least 8 characters.</p>
-      </div>
+        <span className="text-[11px] text-[var(--hx-muted-fg)]">
+          At least 8 characters.
+        </span>
+      </label>
       {error && (
-        <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div
+          className="rounded-lg border px-3 py-2 text-[12.5px]"
+          style={{
+            background:
+              "color-mix(in oklch, var(--hx-err) 10%, transparent)",
+            borderColor:
+              "color-mix(in oklch, var(--hx-err) 30%, transparent)",
+            color: "var(--hx-err)",
+          }}
+        >
           {error}
         </div>
       )}
-      <Button type="submit" className="w-full" disabled={loading}>
-        {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-        Create account
-      </Button>
+      <HxButton type="submit" variant="primary" size="lg" disabled={loading}>
+        {loading ? "Creating…" : "Create account"}
+      </HxButton>
     </form>
   );
 }

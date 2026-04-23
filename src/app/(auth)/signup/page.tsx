@@ -1,32 +1,40 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Gamepad2 } from "lucide-react";
+import { HxCard } from "@/components/hex/card";
+import { HexWordmark } from "@/components/hex/logo";
 import { getCurrentUser } from "@/lib/auth";
 import { SignupForm } from "./signup-form";
 
 export default async function SignupPage() {
   const user = await getCurrentUser();
   if (user) redirect("/dashboard");
-
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
-      <div className="w-full max-w-sm">
-        <div className="mb-6 flex items-center justify-center gap-2 text-lg font-semibold">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/20 text-primary">
-            <Gamepad2 className="h-4 w-4" />
-          </div>
-          GameServerOS
+    <div
+      className="flex min-h-screen items-center justify-center p-6"
+      style={{ background: "var(--hx-app-bg)" }}
+    >
+      <div className="w-full max-w-[400px]">
+        <div className="mb-5 flex justify-center">
+          <HexWordmark size={18} />
         </div>
-        <div className="rounded-xl border border-border bg-card p-6 shadow-xl">
-          <h1 className="text-xl font-semibold">Create your account</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+        <HxCard padding={32}>
+          <h1
+            className="m-0 mb-1 text-[20px] font-semibold"
+            style={{ letterSpacing: "-0.02em" }}
+          >
+            Create your account
+          </h1>
+          <p className="mb-6 text-[13px] text-[var(--hx-muted-fg)]">
             Start hosting game servers in minutes.
           </p>
           <SignupForm />
-        </div>
-        <p className="mt-4 text-center text-sm text-muted-foreground">
+        </HxCard>
+        <p className="mt-4 text-center text-[13px] text-[var(--hx-muted-fg)]">
           Already have an account?{" "}
-          <Link href="/login" className="text-primary hover:underline">
+          <Link
+            href="/login"
+            className="text-[var(--hx-accent-fg)] hover:underline"
+          >
             Log in
           </Link>
         </p>

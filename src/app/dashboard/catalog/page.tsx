@@ -1,46 +1,53 @@
-import { Gamepad2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { PageHeader } from "@/components/dashboard/page-header";
 import { db } from "@/db";
 import { supportedGames } from "@/db/schema";
+import { PageContainer, PageHeader } from "@/components/hex/page";
+import { HxCard } from "@/components/hex/card";
+import { HxBadge } from "@/components/hex/badge";
+import { HxGameTile } from "@/components/hex/game-tile";
 
 export const dynamic = "force-dynamic";
 
 export default async function CatalogPage() {
-  const games = await db.select().from(supportedGames).orderBy(supportedGames.name);
+  const games = await db
+    .select()
+    .from(supportedGames)
+    .orderBy(supportedGames.name);
 
   return (
-    <div>
+    <PageContainer>
       <PageHeader
-        title="Game Catalog"
-        description="Every game you can one-click deploy to a host. Deployment happens from a host's page."
+        title="Games"
+        subtitle={`${games.length} ${games.length === 1 ? "game" : "games"} you can one-click deploy. Deployment happens from a host's page.`}
       />
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div
+        className="grid gap-[var(--hx-gap-md)]"
+        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}
+      >
         {games.map((g) => (
-          <Card key={g.id}>
-            <CardContent className="p-5">
-              <div className="flex items-start justify-between">
-                <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Gamepad2 className="h-5 w-5" />
+          <HxCard key={g.id} padding={18} className="flex flex-col gap-3">
+            <div className="flex items-center gap-3">
+              <HxGameTile gameId={g.id} size={44} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[14px] font-medium">{g.name}</div>
+                <div className="font-mono text-[11px] text-[var(--hx-muted-fg)]">
+                  port {g.defaultPort} · up to {g.defaultMaxPlayers}
                 </div>
-                <Badge variant="success">Available</Badge>
               </div>
-              <h3 className="mt-4 font-semibold">{g.name}</h3>
-              {g.description && (
-                <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">
-                  {g.description}
-                </p>
-              )}
-              <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
-                <span className="font-mono">port {g.defaultPort}</span>
-                <span>·</span>
-                <span>up to {g.defaultMaxPlayers} players</span>
-              </div>
-            </CardContent>
-          </Card>
+              <HxBadge tone="ok" size="sm">
+                Available
+              </HxBadge>
+            </div>
+            {g.description && (
+              <p className="text-[12.5px] leading-[1.55] text-[var(--hx-muted-fg)]">
+                {g.description}
+              </p>
+            )}
+            <div className="flex items-center gap-2 font-mono text-[11px] text-[var(--hx-muted-fg)]">
+              {g.steamAppId != null && <span>steam {g.steamAppId}</span>}
+            </div>
+          </HxCard>
         ))}
       </div>
-    </div>
+    </PageContainer>
   );
 }

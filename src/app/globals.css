@@ -4,58 +4,140 @@
 @tailwind components;
 @tailwind utilities;
 
-@layer base {
-  :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 5.9% 10%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 5.9% 10%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 217 91% 60%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 98%;
-    --success: 142 71% 45%;
-    --success-foreground: 0 0% 98%;
-    --warning: 38 92% 50%;
-    --warning-foreground: 0 0% 9%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 217 91% 60%;
-    --radius: 0.5rem;
-  }
+/* Geist + Geist Mono delivered via a <link> tag in layout.tsx. Expose them
+   as CSS variables so the Tailwind --font-geist-sans / --font-geist-mono
+   variables resolve correctly. */
+:root {
+  --font-geist-sans:
+    "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-geist-mono:
+    "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 
+/* ==========================================================================
+   Hexmesh design tokens (OKLch).  Dark by default; we force
+   data-theme="dark" on <html>, but the `:root` block doubles as the light
+   fallback should the attr ever be cleared.
+   ========================================================================== */
+:root {
+  --hx-bg:              oklch(0.995 0.002 250);
+  --hx-app-bg:          oklch(0.985 0.002 250);
+  --hx-surface:         oklch(0.995 0.002 250);
+  --hx-surface-sunken:  oklch(0.975 0.003 250);
+  --hx-fg:              oklch(0.18 0.01 255);
+  --hx-muted-fg:        oklch(0.56 0.01 255);
+  --hx-border:          oklch(0.91 0.004 255);
+  --hx-border-strong:   oklch(0.82 0.005 255);
+  --hx-chip:            oklch(0.955 0.004 255);
+  --hx-chip-strong:     oklch(0.92 0.005 255);
+  --hx-accent:          oklch(0.72 0.18 145);
+  --hx-accent-fg:       oklch(0.42 0.17 145);
+  --hx-accent-2:        oklch(0.62 0.15 285);
+  --hx-ok:              oklch(0.72 0.18 145);
+  --hx-ok-fg:           oklch(0.42 0.17 145);
+  --hx-warn:            oklch(0.78 0.15 75);
+  --hx-warn-fg:         oklch(0.48 0.14 70);
+  --hx-err:             oklch(0.62 0.2 25);
+
+  --hx-page-pad:  28px;
+  --hx-gap-md:    16px;
+  --hx-gap-lg:    24px;
+  --hx-sidebar-w: 220px;
+
+  /* shadcn variables re-mapped so existing primitives pick up Hexmesh look. */
+  --background: 240 10% 4%;
+  --foreground: 0 0% 98%;
+  --card: 240 6% 10%;
+  --card-foreground: 0 0% 98%;
+  --popover: 240 6% 6%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 240 10% 4%;
+  --secondary: 240 4% 16%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 240 4% 16%;
+  --muted-foreground: 240 5% 64%;
+  --accent: 240 4% 16%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 98%;
+  --success: 142 71% 45%;
+  --success-foreground: 0 0% 98%;
+  --warning: 38 92% 50%;
+  --warning-foreground: 240 10% 4%;
+  --border: 240 4% 16%;
+  --input: 240 4% 16%;
+  --ring: 142 71% 45%;
+  --radius: 0.5rem;
+}
+
+[data-theme="dark"] {
+  --hx-bg:              oklch(0.16 0.008 255);
+  --hx-app-bg:          oklch(0.14 0.008 255);
+  --hx-surface:         oklch(0.18 0.008 255);
+  --hx-surface-sunken:  oklch(0.15 0.008 255);
+  --hx-fg:              oklch(0.96 0.004 255);
+  --hx-muted-fg:        oklch(0.64 0.01 255);
+  --hx-border:          oklch(0.26 0.008 255);
+  --hx-border-strong:   oklch(0.36 0.008 255);
+  --hx-chip:            oklch(0.22 0.008 255);
+  --hx-chip-strong:     oklch(0.28 0.008 255);
+  --hx-accent:          oklch(0.78 0.18 145);
+  --hx-accent-fg:       oklch(0.82 0.17 145);
+  --hx-accent-2:        oklch(0.72 0.15 285);
+  --hx-ok:              oklch(0.78 0.18 145);
+  --hx-ok-fg:           oklch(0.82 0.17 145);
+  --hx-warn:            oklch(0.82 0.15 75);
+  --hx-warn-fg:         oklch(0.86 0.14 70);
+  --hx-err:             oklch(0.72 0.2 25);
+}
+
+@layer base {
   html {
     color-scheme: dark;
   }
-
-  * {
-    @apply border-border;
-  }
-
   body {
-    @apply bg-background text-foreground;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    background: var(--hx-app-bg);
+    color: var(--hx-fg);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-feature-settings: "ss01" 1, "cv11" 1;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--hx-accent) 30%, transparent);
+    color: var(--hx-fg);
+  }
+  * {
+    border-color: var(--hx-border);
   }
 }
 
 @layer utilities {
-  .scrollbar-thin::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+  .font-mono {
+    font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo,
+      monospace;
   }
-  .scrollbar-thin::-webkit-scrollbar-track {
-    background: transparent;
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: hsl(var(--border));
-    border-radius: 4px;
+    background: var(--hx-border);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: var(--hx-border-strong);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+  .hx-mono-tag {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
   }
 }

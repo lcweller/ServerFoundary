@@ -1,12 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import type { Host } from "@/db/schema";
+import { HxCard } from "@/components/hex/card";
+import { HxButton } from "@/components/hex/button";
 
 export function SettingsTab({
   host,
@@ -28,54 +25,77 @@ export function SettingsTab({
     });
     setSaving(false);
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setTimeout(() => setSaved(false), 1500);
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">General</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>Host name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>Created</Label>
-            <Input
-              value={new Date(host.createdAt).toLocaleString()}
-              disabled
-            />
-          </div>
-          <div>
-            <Button onClick={save} disabled={saving || name === host.name}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {saved ? "Saved!" : "Save changes"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+    <div className="flex flex-col gap-[var(--hx-gap-md)]">
+      <HxCard padding={20}>
+        <div className="mb-3 text-[14px] font-medium">Host name</div>
+        <div className="flex gap-2">
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="h-9 flex-1 rounded-lg border px-3 text-[13.5px]"
+            style={{
+              background: "var(--hx-bg)",
+              borderColor: "var(--hx-border)",
+              color: "var(--hx-fg)",
+            }}
+          />
+          <HxButton
+            variant="secondary"
+            disabled={saving || name === host.name}
+            onClick={save}
+          >
+            {saved ? "Saved" : "Save"}
+          </HxButton>
+        </div>
+        <div className="mt-2 text-[12px] text-[var(--hx-muted-fg)]">
+          Used as the label in the dashboard and on this host&apos;s logs.
+        </div>
+      </HxCard>
 
-      <Card className="border-destructive/30">
-        <CardHeader>
-          <CardTitle className="text-base text-destructive">
-            Danger zone
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="flex items-center justify-between gap-4">
+      <HxCard padding={20}>
+        <div className="mb-3 text-[14px] font-medium">Agent</div>
+        <div className="grid items-center gap-3 text-[13px]" style={{ gridTemplateColumns: "1fr auto" }}>
           <div>
-            <div className="font-medium">Remove this host</div>
-            <div className="text-sm text-muted-foreground">
-              Disconnects the server and deletes all data.
+            <div>
+              Running{" "}
+              <span className="font-mono">
+                {host.agentVersion ? `v${host.agentVersion}` : "—"}
+              </span>
+            </div>
+            <div className="mt-0.5 text-[12px] text-[var(--hx-muted-fg)]">
+              Agents self-update from the dashboard&apos;s{" "}
+              <span className="font-mono">/agent.cjs</span>. Run the install
+              command again to force an update.
             </div>
           </div>
-          <Button variant="destructive" onClick={onDelete}>
-            Remove Host
-          </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </HxCard>
+
+      <HxCard
+        padding={20}
+        style={{
+          borderColor:
+            "color-mix(in oklch, var(--hx-err) 40%, var(--hx-border))",
+        }}
+      >
+        <div
+          className="mb-1 text-[14px] font-medium"
+          style={{ color: "var(--hx-err)" }}
+        >
+          Danger zone
+        </div>
+        <div className="mb-3 text-[13px] text-[var(--hx-muted-fg)]">
+          Removing this host will stop all game servers running on it and
+          unenroll the agent. Server data is preserved on disk.
+        </div>
+        <HxButton variant="danger" icon="trash" onClick={onDelete}>
+          Remove host
+        </HxButton>
+      </HxCard>
     </div>
   );
 }

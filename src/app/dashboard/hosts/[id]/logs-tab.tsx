@@ -1,17 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { EmptyState } from "@/components/dashboard/empty-state";
-import { FileText } from "lucide-react";
 import type { Host, GameServerLog } from "@/db/schema";
+import { HxCard } from "@/components/hex/card";
+import { HxIcon } from "@/components/hex/icons";
+import { StatusDot } from "@/components/hex/status-dot";
+
+const SEV_COLORS: Record<string, string> = {
+  info: "var(--hx-muted-fg)",
+  warn: "var(--hx-warn)",
+  error: "var(--hx-err)",
+  debug: "var(--hx-accent-2)",
+};
 
 export function LogsTab({ host }: { host: Host }) {
   const [logs, setLogs] = useState<GameServerLog[]>([]);
@@ -37,7 +37,11 @@ export function LogsTab({ host }: { host: Host }) {
   const filtered = logs.filter((l) => {
     if (level !== "all" && l.level !== level) return false;
     if (source !== "all") {
-      if (source === "system" || source === "agent" || source === "game") {
+      if (
+        source === "system" ||
+        source === "agent" ||
+        source === "game"
+      ) {
         if (l.source !== source) return false;
       } else if (l.gameServerId !== source) return false;
     }
@@ -45,76 +49,87 @@ export function LogsTab({ host }: { host: Host }) {
   });
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-3">
-        <div className="min-w-[140px]">
-          <Select value={level} onValueChange={setLevel}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All levels</SelectItem>
-              <SelectItem value="info">Info</SelectItem>
-              <SelectItem value="warn">Warning</SelectItem>
-              <SelectItem value="error">Error</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="min-w-[180px]">
-          <Select value={source} onValueChange={setSource}>
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All sources</SelectItem>
-              <SelectItem value="system">System</SelectItem>
-              <SelectItem value="agent">Agent</SelectItem>
-              <SelectItem value="game">Game output</SelectItem>
-              {servers.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+    <HxCard padding={0} className="overflow-hidden">
+      <div
+        className="flex items-center gap-2 border-b px-3.5 py-2.5"
+        style={{ borderColor: "var(--hx-border)" }}
+      >
+        <StatusDot status="online" size={6} />
+        <div className="font-mono text-[12px]">streaming from {host.name}</div>
+        <div className="flex-1" />
+        {["all", "info", "warn", "error"].map((s) => (
+          <button
+            key={s}
+            onClick={() => setLevel(s)}
+            className="rounded border px-2 py-0.5 font-mono text-[11px] uppercase"
+            style={{
+              background: level === s ? "var(--hx-chip)" : "transparent",
+              borderColor: "var(--hx-border)",
+              color: "var(--hx-fg)",
+            }}
+          >
+            {s}
+          </button>
+        ))}
+        <select
+          value={source}
+          onChange={(e) => setSource(e.target.value)}
+          className="h-7 rounded-md border px-2 text-[12px]"
+          style={{
+            background: "var(--hx-bg)",
+            borderColor: "var(--hx-border)",
+            color: "var(--hx-fg)",
+          }}
+        >
+          <option value="all">All sources</option>
+          <option value="system">System</option>
+          <option value="agent">Agent</option>
+          <option value="game">Game</option>
+          {servers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
       </div>
-
-      {filtered.length === 0 ? (
-        <EmptyState
-          icon={<FileText className="h-5 w-5" />}
-          title="No logs yet"
-          description="Deploy a game server and logs will appear here."
-        />
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <div className="scrollbar-thin max-h-[600px] overflow-y-auto font-mono text-xs">
-              {filtered.map((l) => (
-                <LogRow key={l.id} log={l} />
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
-  );
-}
-
-function LogRow({ log }: { log: GameServerLog }) {
-  const levelColor =
-    log.level === "error"
-      ? "text-destructive"
-      : log.level === "warn"
-        ? "text-warning"
-        : "text-muted-foreground";
-  const ts = new Date(log.createdAt).toISOString().slice(11, 19);
-  return (
-    <div className="flex gap-4 border-b border-border/60 px-4 py-2 last:border-b-0 hover:bg-accent/20">
-      <span className="text-muted-foreground">{ts}</span>
-      <span className={`w-12 uppercase ${levelColor}`}>{log.level}</span>
-      <span className="w-16 text-muted-foreground">{log.source}</span>
-      <span className="flex-1 whitespace-pre-wrap break-all">{log.message}</span>
-    </div>
+      <div
+        className="scrollbar-thin font-mono"
+        style={{
+          background: "#0b0d0f",
+          color: "#c8d0d6",
+          fontSize: 12,
+          lineHeight: 1.55,
+          padding: 14,
+          minHeight: 320,
+          maxHeight: 520,
+          overflowY: "auto",
+        }}
+      >
+        {filtered.length === 0 && (
+          <div className="px-1 py-6 text-center text-[var(--hx-muted-fg)]">
+            No log lines yet.
+          </div>
+        )}
+        {filtered.map((l) => (
+          <div key={l.id} className="flex gap-2.5 py-[1px]">
+            <span className="shrink-0 text-[#5b6470]">
+              {new Date(l.createdAt).toISOString().slice(11, 19)}
+            </span>
+            <span
+              className="w-12 shrink-0 uppercase"
+              style={{ color: SEV_COLORS[l.level] ?? "#c8d0d6" }}
+            >
+              {l.level}
+            </span>
+            <span className="w-14 shrink-0 text-[#7a8593]">[{l.source}]</span>
+            <span className="whitespace-pre-wrap break-all">{l.message}</span>
+          </div>
+        ))}
+      </div>
+      {/* keep HxIcon import referenced for future use */}
+      <span className="hidden">
+        <HxIcon.logs />
+      </span>
+    </HxCard>
   );
 }

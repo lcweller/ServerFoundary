@@ -1,9 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 
 export function BrowserTerminal({
   hostId,
@@ -18,6 +15,8 @@ export function BrowserTerminal({
   const [status, setStatus] = useState<"connecting" | "ready" | "closed">(
     "connecting",
   );
+  void status;
+  void onClose;
 
   useEffect(() => {
     let terminal: import("xterm").Terminal | null = null;
@@ -112,27 +111,10 @@ export function BrowserTerminal({
   }, [hostId, wsUrl]);
 
   return (
-    <Card>
-      <CardContent className="p-0">
-        <div className="flex items-center justify-between border-b border-border px-4 py-2 text-xs">
-          <span className="text-muted-foreground">
-            {status === "connecting"
-              ? "Connecting..."
-              : status === "ready"
-                ? "Connected"
-                : "Disconnected"}
-          </span>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            <X className="h-3.5 w-3.5" />
-            Disconnect
-          </Button>
-        </div>
-        <div
-          ref={containerRef}
-          className="h-[480px] w-full bg-[#09090b] p-2"
-          style={{ minHeight: 480 }}
-        />
-      </CardContent>
-    </Card>
+    <div
+      ref={containerRef}
+      className="w-full p-2"
+      style={{ height: 480, minHeight: 480, background: "#0b0d0f" }}
+    />
   );
 }

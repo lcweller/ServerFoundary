@@ -2,27 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Check,
-  Pencil,
-  Terminal as TerminalIcon,
-  Trash2,
-  Loader2,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { StatusBadge } from "@/components/dashboard/status-dot";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import type { Host } from "@/db/schema";
 import type { Metrics } from "@/lib/hosts";
+import { PageContainer, PageHeader } from "@/components/hex/page";
+import { HxCard } from "@/components/hex/card";
+import { HxBadge } from "@/components/hex/badge";
+import { StatusDot } from "@/components/hex/status-dot";
+import { HxIcon } from "@/components/hex/icons";
+import { HxButton } from "@/components/hex/button";
+import { relativeTime } from "@/lib/format";
 import { OverviewTab } from "./overview-tab";
 import { GameServersTab } from "./game-servers-tab";
 import { TerminalTab } from "./terminal-tab";
@@ -32,6 +20,16 @@ import { SettingsTab } from "./settings-tab";
 type HostWithStatus = Host & {
   effectiveStatus: "online" | "offline" | "connecting";
 };
+
+const TABS = [
+  { id: "overview", label: "Overview" },
+  { id: "servers", label: "Game servers" },
+  { id: "terminal", label: "Terminal" },
+  { id: "logs", label: "Logs" },
+  { id: "settings", label: "Settings" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
 
 export function HostDetail({
   initialHost,
@@ -44,10 +42,7 @@ export function HostDetail({
 }) {
   const router = useRouter();
   const [host, setHost] = useState<HostWithStatus>(initialHost);
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState(initialHost.name);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [tab, setTab] = useState<TabId>("overview");
 
   const refresh = useCallback(async () => {
     try {
@@ -69,168 +64,128 @@ export function HostDetail({
     };
   }, [refresh]);
 
-  async function saveName() {
-    if (nameDraft.trim().length === 0 || nameDraft === host.name) {
-      setEditingName(false);
-      setNameDraft(host.name);
-      return;
-    }
-    const res = await fetch(`/api/hosts/${host.id}`, {
-      method: "PATCH",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: nameDraft.trim() }),
-    });
-    if (res.ok) {
-      setHost({ ...host, name: nameDraft.trim() });
-    }
-    setEditingName(false);
-  }
-
   async function deleteHost() {
-    setDeleting(true);
+    if (
+      !confirm(
+        `Remove ${host.name}? This disconnects the agent and removes all data.`,
+      )
+    )
+      return;
     const res = await fetch(`/api/hosts/${host.id}`, { method: "DELETE" });
     if (res.ok) {
       router.push("/dashboard/hosts");
       router.refresh();
     }
-    setDeleting(false);
-    setDeleteOpen(false);
   }
 
-  const metrics = (host.metrics as Metrics | null) ?? {};
+  const metrics = (host.metrics as Metrics | null) ?? null;
+  const lastHb = host.lastHeartbeatAt
+    ? Math.floor(
+        (Date.now() - new Date(host.lastHeartbeatAt).getTime()) / 1000,
+      )
+    : null;
 
   return (
-    <div>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <div className="flex items-center gap-3">
-            {editingName ? (
-              <div className="flex items-center gap-2">
-                <Input
-                  value={nameDraft}
-                  onChange={(e) => setNameDraft(e.target.value)}
-                  className="h-8 w-64"
-                  autoFocus
-                  onBlur={saveName}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") saveName();
-                    if (e.key === "Escape") {
-                      setEditingName(false);
-                      setNameDraft(host.name);
-                    }
-                  }}
-                />
-                <Button size="sm" variant="ghost" onClick={saveName}>
-                  <Check className="h-4 w-4" />
-                </Button>
-              </div>
-            ) : (
+    <PageContainer>
+      <PageHeader
+        title={
+          <span className="font-mono" style={{ letterSpacing: "-0.015em" }}>
+            {host.name}
+          </span>
+        }
+        subtitle={metrics?.os?.name ? `${metrics.os.name} ${metrics.os.version ?? ""}`.trim() : "Awaiting first heartbeat"}
+        meta={
+          <div className="flex flex-wrap items-center gap-2.5 text-[12px] text-[var(--hx-muted-fg)]">
+            <HxBadge
+              tone={
+                host.effectiveStatus === "online"
+                  ? "ok"
+                  : host.effectiveStatus === "connecting"
+                    ? "warn"
+                    : "neutral"
+              }
+            >
+              <StatusDot status={host.effectiveStatus} size={6} />
+              {host.effectiveStatus}
+            </HxBadge>
+            <span className="font-mono">{host.ipAddress ?? "—"}</span>
+            <span>·</span>
+            <span>
+              last heartbeat {lastHb != null ? relativeTime(lastHb) : "never"}
+            </span>
+            {host.agentVersion && (
               <>
-                <h1 className="text-2xl font-bold tracking-tight md:text-3xl">
-                  {host.name}
-                </h1>
-                <button
-                  className="text-muted-foreground hover:text-foreground"
-                  onClick={() => {
-                    setNameDraft(host.name);
-                    setEditingName(true);
-                  }}
-                  aria-label="Edit name"
-                >
-                  <Pencil className="h-4 w-4" />
-                </button>
+                <span>·</span>
+                <span>agent v{host.agentVersion}</span>
               </>
             )}
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <StatusBadge status={host.effectiveStatus} />
-            <span className="font-mono">{host.ipAddress ?? "—"}</span>
-            {host.agentVersion && (
-              <span className="text-xs">agent {host.agentVersion}</span>
-            )}
-            {metrics.os?.name && (
-              <span className="text-xs">
-                {metrics.os.name} {metrics.os.version}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={host.effectiveStatus !== "online"}
-            onClick={() => {
-              const el = document.getElementById("terminal-tab-trigger");
-              el?.click();
+        }
+        actions={
+          <>
+            <HxButton
+              variant="secondary"
+              size="md"
+              icon="terminal"
+              onClick={() => setTab("terminal")}
+              disabled={host.effectiveStatus !== "online"}
+            >
+              Open shell
+            </HxButton>
+            <HxButton
+              variant="danger"
+              size="md"
+              icon="trash"
+              onClick={deleteHost}
+            >
+              Remove host
+            </HxButton>
+          </>
+        }
+      />
+
+      {/* Tabs */}
+      <div
+        className="mb-[var(--hx-gap-lg)] flex gap-1 border-b"
+        style={{ borderColor: "var(--hx-border)" }}
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className="px-3.5 py-2.5 text-[13px] font-medium transition-colors"
+            style={{
+              background: "transparent",
+              border: "none",
+              marginBottom: -1,
+              color:
+                tab === t.id ? "var(--hx-fg)" : "var(--hx-muted-fg)",
+              borderBottom:
+                tab === t.id
+                  ? "2px solid var(--hx-fg)"
+                  : "2px solid transparent",
+              fontWeight: tab === t.id ? 500 : 400,
             }}
           >
-            <TerminalIcon className="h-4 w-4" />
-            Open Terminal
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive hover:text-destructive"
-            onClick={() => setDeleteOpen(true)}
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete Host
-          </Button>
-        </div>
+            {t.label}
+          </button>
+        ))}
+        <div className="flex-1" />
+        <button
+          onClick={refresh}
+          className="my-1.5 flex items-center gap-1.5 rounded-md px-2 text-[12px] text-[var(--hx-muted-fg)] hover:text-[var(--hx-fg)]"
+          title="Refresh now"
+        >
+          <HxIcon.restart size={12} />
+          Refresh
+        </button>
       </div>
 
-      <Tabs defaultValue="overview" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="game-servers">Game Servers</TabsTrigger>
-          <TabsTrigger value="terminal" id="terminal-tab-trigger">
-            Terminal
-          </TabsTrigger>
-          <TabsTrigger value="logs">Logs</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-        </TabsList>
-        <TabsContent value="overview">
-          <OverviewTab host={host} />
-        </TabsContent>
-        <TabsContent value="game-servers">
-          <GameServersTab host={host} games={games} />
-        </TabsContent>
-        <TabsContent value="terminal">
-          <TerminalTab host={host} wsUrl={wsUrl} />
-        </TabsContent>
-        <TabsContent value="logs">
-          <LogsTab host={host} />
-        </TabsContent>
-        <TabsContent value="settings">
-          <SettingsTab host={host} onDelete={() => setDeleteOpen(true)} />
-        </TabsContent>
-      </Tabs>
-
-      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove this host?</DialogTitle>
-            <DialogDescription>
-              This will disconnect the server and remove all associated data,
-              including game servers and logs. This cannot be undone.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={deleteHost}
-              disabled={deleting}
-            >
-              {deleting && <Loader2 className="h-4 w-4 animate-spin" />}
-              Delete Host
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+      {tab === "overview" && <OverviewTab host={host} />}
+      {tab === "servers" && <GameServersTab host={host} games={games} />}
+      {tab === "terminal" && <TerminalTab host={host} wsUrl={wsUrl} />}
+      {tab === "logs" && <LogsTab host={host} />}
+      {tab === "settings" && <SettingsTab host={host} onDelete={deleteHost} />}
+    </PageContainer>
   );
 }
