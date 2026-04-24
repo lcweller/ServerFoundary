@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { gameServers, hosts, supportedGames, gameServerLogs } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { dispatchCommand } from "@/lib/agent-hub";
+import { resolveEgg, type EggJson, type EggInstall } from "@/lib/eggs";
 
 export async function GET(
   _req: NextRequest,
@@ -67,6 +68,12 @@ export async function POST(
   if (!game) {
     return NextResponse.json({ error: "Unknown game" }, { status: 400 });
   }
+  if (!game.available) {
+    return NextResponse.json(
+      { error: `${game.name} isn't available yet in this MVP.` },
+      { status: 400 },
+    );
+  }
 
   const port =
     Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536
@@ -93,15 +100,48 @@ export async function POST(
     message: `Server "${name}" queued for deployment.`,
   });
 
+  // Resolve the egg (if any) or fall back to the legacy startup/SteamCMD
+  // pair. The agent receives a fully-resolved, shell-ready startup command
+  // and an explicit install spec; it doesn't need to know about eggs.
+  const egg = game.eggJson as EggJson | null;
+  let startup: string;
+  let install: EggInstall | null = null;
+  let bootstrapFiles: Record<string, string> = {};
+
+  if (egg) {
+    const resolved = resolveEgg(egg, {
+      serverId: server.id,
+      serverName: server.name,
+      port: server.port,
+    });
+    startup = resolved.startup;
+    install = resolved.install;
+    bootstrapFiles = resolved.bootstrapFiles;
+  } else {
+    startup = game.startupCommand
+      .replace(/\{PORT\}/g, String(server.port))
+      .replace(/\{SERVER_NAME\}/g, server.name);
+    if (game.steamAppId != null) {
+      install = { kind: "steamcmd", app_id: game.steamAppId };
+    }
+  }
+
   const delivered = await dispatchCommand(id, {
     type: "deploy_game_server",
     gameServer: {
       id: server.id,
       name: server.name,
       gameId: server.gameId,
-      steamAppId: game.steamAppId,
       port: server.port,
-      startupCommand: game.startupCommand,
+      // Fully resolved — no more {PORT} / {SERVER_NAME} / {{VAR}} left.
+      startupCommand: startup,
+      // New structured install step. Legacy agents ignore unknown fields.
+      install,
+      bootstrapFiles,
+      // Kept for backward-compat with older agent.cjs bundles still in the
+      // wild that read steamAppId directly; safe to remove once everyone
+      // has pulled a post-Phase-2 build.
+      steamAppId: install?.kind === "steamcmd" ? install.app_id : null,
     },
   });
   if (!delivered) {

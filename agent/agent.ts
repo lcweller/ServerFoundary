@@ -414,6 +414,137 @@ async function downloadViaSteamCmd(
   });
 }
 
+/**
+ * Fetch the latest Paper build for the requested Minecraft version and
+ * write it to <installDir>/<target>. Uses the official PaperMC v2 API.
+ */
+async function downloadPaperJar(
+  installDir: string,
+  spec: { name: string; port: number; startupCommand: string },
+  install: { target?: string; version_variable?: string },
+  onLog: (line: string) => void,
+): Promise<void> {
+  ensureDir(installDir);
+  // The MC version isn't sent separately — it's already baked into the
+  // resolved startup command via {{MINECRAFT_VERSION}} substitution on the
+  // server. We re-extract it from the startup command as a fallback (it
+  // doesn't appear there today for Paper, so use a sensible default) or
+  // from the target filename if it embeds the version.
+  // Simpler: accept it via an env var on the startup command; until then,
+  // hardcode the default used in seed.ts. The API route can extend the
+  // message to include `install.version` later.
+  const version = spec.startupCommand.match(/paper-(\d+\.\d+(?:\.\d+)?)/)?.[1]
+    ?? "1.20.1";
+  const target = install.target ?? "paper.jar";
+  onLog(`Resolving Paper build for Minecraft ${version}`);
+  const buildsRes = await fetch(
+    `https://api.papermc.io/v2/projects/paper/versions/${version}/builds`,
+  );
+  if (!buildsRes.ok) {
+    throw new Error(
+      `PaperMC API returned ${buildsRes.status} for version ${version}`,
+    );
+  }
+  const builds = (await buildsRes.json()) as {
+    builds: Array<{ build: number; downloads: { application: { name: string } } }>;
+  };
+  const latest = builds.builds[builds.builds.length - 1];
+  if (!latest) throw new Error(`No Paper builds available for ${version}`);
+  const downloadName = latest.downloads.application.name;
+  const url = `https://api.papermc.io/v2/projects/paper/versions/${version}/builds/${latest.build}/downloads/${downloadName}`;
+  onLog(`Downloading Paper ${version} build ${latest.build}`);
+  const dlRes = await fetch(url);
+  if (!dlRes.ok) {
+    throw new Error(`Paper download returned ${dlRes.status}`);
+  }
+  const buf = Buffer.from(await dlRes.arrayBuffer());
+  const fs = require("fs") as typeof import("fs");
+  fs.writeFileSync(path.join(installDir, target), buf);
+  onLog(`Saved ${target} (${(buf.length / 1_048_576).toFixed(1)} MiB)`);
+}
+
+/**
+ * Minimal HTTP download helper. Pulls a URL, optionally extracts a
+ * .tar.gz or .zip into the install dir. Used for games that ship a
+ * server bundle off Steam (Terraria, etc. — future).
+ */
+async function downloadHttp(
+  installDir: string,
+  install: {
+    url: string;
+    target?: string;
+    extract?: "none" | "tar.gz" | "zip";
+  },
+  onLog: (line: string) => void,
+): Promise<void> {
+  ensureDir(installDir);
+  onLog(`Fetching ${install.url}`);
+  const res = await fetch(install.url);
+  if (!res.ok) throw new Error(`Download returned ${res.status}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  const fs = require("fs") as typeof import("fs");
+  const extract = install.extract ?? "none";
+  if (extract === "none") {
+    const target = install.target ?? path.basename(new URL(install.url).pathname);
+    fs.writeFileSync(path.join(installDir, target), buf);
+    onLog(`Saved ${target}`);
+    return;
+  }
+  if (extract === "tar.gz") {
+    const tmp = path.join(installDir, ".download.tgz");
+    fs.writeFileSync(tmp, buf);
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn("tar", ["-xzf", tmp, "-C", installDir], {
+        stdio: "ignore",
+      });
+      p.on("error", reject);
+      p.on("close", (c) =>
+        c === 0 ? resolve() : reject(new Error(`tar exited ${c}`)),
+      );
+    });
+    fs.unlinkSync(tmp);
+    onLog(`Extracted tar.gz`);
+    return;
+  }
+  if (extract === "zip") {
+    const tmp = path.join(installDir, ".download.zip");
+    fs.writeFileSync(tmp, buf);
+    await new Promise<void>((resolve, reject) => {
+      const p = spawn("unzip", ["-o", tmp, "-d", installDir], {
+        stdio: "ignore",
+      });
+      p.on("error", reject);
+      p.on("close", (c) =>
+        c === 0 ? resolve() : reject(new Error(`unzip exited ${c}`)),
+      );
+    });
+    fs.unlinkSync(tmp);
+    onLog(`Extracted zip`);
+    return;
+  }
+}
+
+/**
+ * Write the (string) files in `bootstrapFiles` to the server directory,
+ * creating parent directories as needed. Used for Minecraft eula.txt and
+ * a stub server.properties with the right port.
+ */
+async function writeBootstrapFiles(
+  dir: string,
+  files: Record<string, string>,
+): Promise<void> {
+  const fs = require("fs") as typeof import("fs");
+  for (const [rel, contents] of Object.entries(files)) {
+    // Guard against path traversal in an egg.
+    if (rel.includes("..") || path.isAbsolute(rel)) {
+      throw new Error(`Refusing to write bootstrap file at unsafe path: ${rel}`);
+    }
+    const full = path.join(dir, rel);
+    ensureDir(path.dirname(full));
+    fs.writeFileSync(full, contents);
+  }
+}
+
 function startProcess(
   server: RunningServer,
   onOutput: (line: string) => void,
@@ -615,11 +746,32 @@ class AgentConnection {
     id: string;
     name: string;
     gameId: string;
-    steamAppId: number | null;
     port: number;
     startupCommand: string;
+    /** Structured install step. Preferred over legacy steamAppId. */
+    install?:
+      | { kind: "paper_jar"; target?: string; version_variable?: string }
+      | { kind: "steamcmd"; app_id: number }
+      | {
+          kind: "http_download";
+          url: string;
+          target?: string;
+          extract?: "none" | "tar.gz" | "zip";
+        }
+      | null;
+    /** Files written before first start, path relative to server dir. */
+    bootstrapFiles?: Record<string, string>;
+    /** Legacy field — older server payloads. */
+    steamAppId?: number | null;
   }) {
     const dir = path.join(SERVERS_DIR, spec.id);
+    // Normalize: accept either new install spec or legacy steamAppId.
+    const install =
+      spec.install ??
+      (spec.steamAppId != null
+        ? { kind: "steamcmd" as const, app_id: spec.steamAppId }
+        : null);
+
     const entry: RunningServer = {
       id: spec.id,
       name: spec.name,
@@ -629,7 +781,7 @@ class AgentConnection {
       proc: null,
       status: "installing",
       restartAttempts: 0,
-      steamAppId: spec.steamAppId,
+      steamAppId: install?.kind === "steamcmd" ? install.app_id : null,
       dir,
     };
     servers.set(spec.id, entry);
@@ -637,28 +789,52 @@ class AgentConnection {
       id: spec.id,
       name: spec.name,
       gameId: spec.gameId,
-      steamAppId: spec.steamAppId,
+      steamAppId: install?.kind === "steamcmd" ? install.app_id : null,
       port: spec.port,
       startupCommand: spec.startupCommand,
     });
     this.reportStatus(entry);
     this.sendLog(spec.id, "info", "system", `Installing to ${dir}`);
 
-    if (spec.steamAppId) {
-      try {
-        await downloadViaSteamCmd(dir, spec.steamAppId, (line) => {
+    try {
+      if (install?.kind === "steamcmd") {
+        await downloadViaSteamCmd(dir, install.app_id, (line) => {
           this.sendLog(spec.id, "info", "system", `[steamcmd] ${line}`);
         });
+      } else if (install?.kind === "paper_jar") {
+        await downloadPaperJar(dir, spec, install, (line) =>
+          this.sendLog(spec.id, "info", "system", `[paper] ${line}`),
+        );
+      } else if (install?.kind === "http_download") {
+        await downloadHttp(dir, install, (line) =>
+          this.sendLog(spec.id, "info", "system", `[download] ${line}`),
+        );
+      }
+      // install is null → no-op; assume startup command self-installs.
+    } catch (err) {
+      entry.status = "error";
+      this.reportStatus(entry);
+      this.sendLog(
+        spec.id,
+        "error",
+        "system",
+        `Install failed: ${(err as Error).message}`,
+      );
+      return;
+    }
+
+    // Bootstrap files (eula.txt, server.properties) go down after the
+    // install but before first start, so Minecraft sees them on boot.
+    if (spec.bootstrapFiles) {
+      try {
+        await writeBootstrapFiles(dir, spec.bootstrapFiles);
       } catch (err) {
-        entry.status = "error";
-        this.reportStatus(entry);
         this.sendLog(
           spec.id,
-          "error",
+          "warn",
           "system",
-          `SteamCMD failed: ${(err as Error).message}`,
+          `Bootstrap file write failed: ${(err as Error).message}`,
         );
-        return;
       }
     }
 

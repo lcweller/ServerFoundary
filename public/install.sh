@@ -79,6 +79,16 @@ apt-get install -y -qq --no-install-recommends \
   lib32stdc++6 \
   || warn "Failed to install some 32-bit libs. SteamCMD may not work without them."
 
+# Minecraft Java is the MVP launch game (PROJECT.md §3.5). Paper 1.20.x
+# needs Java 17. default-jre-headless on Ubuntu 22.04/24.04 and Debian 12
+# resolves to an appropriate OpenJDK build. Tiny by server standards (~60
+# MB); install unconditionally so deploy doesn't stall at runtime.
+say "Installing Java runtime for Minecraft"
+apt-get install -y -qq --no-install-recommends \
+  openjdk-17-jre-headless \
+  || apt-get install -y -qq --no-install-recommends default-jre-headless \
+  || warn "Couldn't install a Java runtime. Minecraft deploys will fail until this is fixed."
+
 install_steamcmd_package() {
   # steamcmd lives in the 'multiverse' component on Ubuntu. Accept the Steam EULA.
   add-apt-repository -y multiverse >/dev/null 2>&1 || true

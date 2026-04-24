@@ -3,12 +3,77 @@ import postgres from "postgres";
 import { notInArray } from "drizzle-orm";
 import { supportedGames } from "./schema";
 
-// Only games whose dedicated-server Steam app allows anonymous SteamCMD
-// login are listed here. 7 Days to Die (294420), CS2 (730), etc. require a
-// paid Steam account to download and will fail with "Missing configuration"
-// if the agent tries to pull them anonymously. Rust and other anonymous
-// server apps can be added later.
-const games = [
+/**
+ * Seed the `supported_games` catalog.
+ *
+ * Split into two tiers:
+ *
+ *  MVP_GAMES      — TCP-only, works with the Cloudflare Tunnel relay, safe
+ *                   to surface in the dashboard today (§3.5 launch set).
+ *  V2_GAMES       — UDP or Steam-paid. Kept as rows so old deployments keep
+ *                   rendering, but `available=false` so the catalog hides
+ *                   them and the deploy button is gated. Will flip to
+ *                   available once the custom WireGuard relay lands
+ *                   (PROJECT.md §7.2).
+ *
+ * The egg_json mirrors a (minimal) subset of the Pterodactyl egg schema;
+ * see src/lib/eggs.ts.
+ */
+
+type Seed = {
+  id: string;
+  name: string;
+  steamAppId: number | null;
+  defaultPort: number;
+  defaultMaxPlayers: number;
+  startupCommand: string;
+  description: string;
+  eggJson: unknown | null;
+  available: boolean;
+  protocol: "tcp" | "udp";
+};
+
+const MVP_GAMES: Seed[] = [
+  {
+    id: "minecraft_java",
+    name: "Minecraft: Java Edition",
+    steamAppId: null,
+    defaultPort: 25565,
+    defaultMaxPlayers: 20,
+    // Legacy fallback; agent prefers the egg startup when present.
+    startupCommand:
+      "java -Xms512M -Xmx2048M -jar paper.jar nogui",
+    description:
+      "The launch game. Paper (a performance fork of the vanilla server) running Minecraft 1.20.1 — the most broadly-compatible modern version.",
+    eggJson: {
+      startup:
+        "java -Xms512M -Xmx{{SERVER_MEMORY}}M -jar {{SERVER_JARFILE}} nogui",
+      variables: [
+        { env_variable: "SERVER_JARFILE", default_value: "paper.jar" },
+        { env_variable: "SERVER_MEMORY", default_value: "2048" },
+        { env_variable: "MINECRAFT_VERSION", default_value: "1.20.1" },
+      ],
+      install: {
+        kind: "paper_jar",
+        target: "paper.jar",
+        version_variable: "MINECRAFT_VERSION",
+      },
+      bootstrap_files: {
+        "eula.txt": "eula=true\n",
+        // Writes a minimal server.properties before first boot so the port
+        // matches what the platform allocated. Minecraft will fill in the
+        // rest of the file on first run.
+        "server.properties":
+          "server-port={{PORT}}\nquery.port={{PORT}}\nmotd={{SERVER_NAME}}\nenable-query=false\n",
+      },
+    },
+    available: true,
+    protocol: "tcp",
+  },
+];
+
+const V2_GAMES: Seed[] = [
+  // UDP — blocked on the custom relay (§7.2). Kept as rows but hidden.
   {
     id: "valheim",
     name: "Valheim",
@@ -16,9 +81,12 @@ const games = [
     defaultPort: 2456,
     defaultMaxPlayers: 10,
     startupCommand:
-      "./valheim_server.x86_64 -name \"{SERVER_NAME}\" -port {PORT} -world \"Dedicated\" -password \"secret\" -public 1",
+      './valheim_server.x86_64 -name "{SERVER_NAME}" -port {PORT} -world "Dedicated" -password "secret" -public 1',
     description:
-      "Viking survival co-op. Explore a procedurally generated world with up to 10 friends.",
+      "Viking survival co-op. UDP — unlocks when the v2 WireGuard relay ships.",
+    eggJson: null,
+    available: false,
+    protocol: "udp",
   },
   {
     id: "project_zomboid",
@@ -28,7 +96,10 @@ const games = [
     defaultMaxPlayers: 16,
     startupCommand: "./start-server.sh -port {PORT}",
     description:
-      "Isometric zombie apocalypse survival sandbox. Build, loot, and survive together.",
+      "Isometric zombie apocalypse survival sandbox. Uses UDP — unlocks with the v2 relay.",
+    eggJson: null,
+    available: false,
+    protocol: "udp",
   },
   {
     id: "rust",
@@ -37,9 +108,12 @@ const games = [
     defaultPort: 28015,
     defaultMaxPlayers: 50,
     startupCommand:
-      "./RustDedicated -batchmode +server.port {PORT} +server.hostname \"{SERVER_NAME}\" +server.maxplayers 50",
+      './RustDedicated -batchmode +server.port {PORT} +server.hostname "{SERVER_NAME}" +server.maxplayers 50',
     description:
-      "Hardcore multiplayer survival. Gather resources, build bases, and try not to get raided.",
+      "Hardcore multiplayer survival. UDP — unlocks with the v2 relay.",
+    eggJson: null,
+    available: false,
+    protocol: "udp",
   },
   {
     id: "csgo",
@@ -50,9 +124,14 @@ const games = [
     startupCommand:
       "rm -f ./bin/libgcc_s.so.1 ./bin/libstdc++.so.6 && bash ./srcds_run -game csgo -console -usercon +game_type 0 +game_mode 1 +mapgroup mg_active +map de_dust2 -port {PORT}",
     description:
-      "Classic competitive FPS. CS:GO dedicated server (pre-CS2) is still free-anonymous and perfect for a private lobby.",
+      "Classic competitive FPS. Mostly UDP — unlocks with the v2 relay.",
+    eggJson: null,
+    available: false,
+    protocol: "udp",
   },
 ];
+
+const GAMES: Seed[] = [...MVP_GAMES, ...V2_GAMES];
 
 async function main() {
   const url =
@@ -63,10 +142,7 @@ async function main() {
   const db = drizzle(client);
 
   console.log("Seeding supported games...");
-  const keepIds = games.map((g) => g.id);
-  // Remove entries no longer in the list (e.g., games that dropped anon
-  // downloads). game_servers.gameId is plain text, not a FK, so existing
-  // server rows keep working.
+  const keepIds = GAMES.map((g) => g.id);
   const removed = await db
     .delete(supportedGames)
     .where(notInArray(supportedGames.id, keepIds))
@@ -76,7 +152,7 @@ async function main() {
       `Removed ${removed.length} stale games: ${removed.map((r) => r.id).join(", ")}`,
     );
   }
-  for (const game of games) {
+  for (const game of GAMES) {
     await db
       .insert(supportedGames)
       .values(game)
@@ -85,7 +161,9 @@ async function main() {
         set: game,
       });
   }
-  console.log(`Seeded ${games.length} games.`);
+  console.log(
+    `Seeded ${GAMES.length} games (${MVP_GAMES.length} MVP, ${V2_GAMES.length} v2).`,
+  );
 
   await client.end();
 }

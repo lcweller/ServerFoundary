@@ -90,8 +90,22 @@ export const supportedGames = pgTable("supported_games", {
   steamAppId: integer("steam_app_id"),
   defaultPort: integer("default_port").notNull(),
   defaultMaxPlayers: integer("default_max_players").notNull().default(16),
+  // Legacy: hand-written shell command for Steam-anon games that don't have
+  // an egg yet. Templated with {PORT} / {SERVER_NAME}. Kept as a fallback
+  // when `eggJson` is null.
   startupCommand: text("startup_command").notNull(),
   description: text("description"),
+  // Subset of the Pterodactyl egg JSON schema. Fields we actually read:
+  //   startup:   command template using {{VAR}} placeholders
+  //   variables: [{ env_variable, default_value }]
+  //   install:   { kind: "paper_jar" | "steamcmd" | "http_download", ... }
+  // See src/lib/eggs.ts for the resolver.
+  eggJson: jsonb("egg_json"),
+  // MVP gate: hide non-anonymous / UDP-only games until the custom relay
+  // lands (§2.4, §7.2). We keep rows rather than delete so existing
+  // deployments don't orphan.
+  available: boolean("available").notNull().default(true),
+  protocol: text("protocol").notNull().default("tcp"),
 });
 
 export type User = typeof users.$inferSelect;
