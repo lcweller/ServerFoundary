@@ -10,9 +10,10 @@
   <Support>https://github.com/lcweller/ServerFoundary/issues</Support>
   <Project>https://github.com/lcweller/ServerFoundary</Project>
   <Overview>
-    ServerFoundary (a.k.a. GameServerOS) — a self-hosted web platform for deploying
-    game servers with one command. Dashboard + WebSocket agent endpoint in one
-    container. Requires a Postgres database (use the official postgres:16 template).
+    ServerFoundary — self-hosted web platform for deploying Minecraft (and soon
+    more) servers to Linux hosts with one command. Dashboard + WebSocket agent
+    endpoint + in-container TCP relay for game traffic, all in one container.
+    Requires Postgres (use the official postgres:16 template).
   </Overview>
   <Category>Tools: GameServers:</Category>
   <WebUI>http://[IP]:[PORT:3000]</WebUI>
@@ -21,16 +22,23 @@
   <DonateText/>
   <DonateLink/>
   <Description>
-    A dark-mode dashboard to deploy, monitor, and control game servers
-    (Valheim, CS2, Project Zomboid, 7 Days to Die, Terraria, ...) from a
-    browser. Install the agent on any Ubuntu server with one curl command
-    and it auto-enrolls with this dashboard.
+    Dark-mode dashboard to deploy, monitor, and control Minecraft Java game
+    servers running on hardware you own. Install the agent on any Ubuntu/
+    Debian box with one curl command; it auto-enrolls with this dashboard
+    and the platform's TCP relay brings the server online without any
+    port-forwarding on the host. (One-time port-forward on the Unraid
+    router itself is required for 30000-30099, see docs/decisions/0001.)
   </Description>
 
   <Config Name="Dashboard HTTP" Target="3000" Default="3000" Mode="tcp" Description="Web dashboard (Next.js)" Type="Port" Display="always" Required="true" Mask="false">3000</Config>
   <Config Name="Agent WebSocket" Target="3001" Default="3001" Mode="tcp" Description="Agent + browser-terminal WebSocket server" Type="Port" Display="always" Required="true" Mask="false">3001</Config>
+  <Config Name="Relay port range" Target="30000-30099" Default="30000-30099" Mode="tcp" Description="Public TCP relay for game traffic (ADR 0001). Port-forward this range on your router for players to connect." Type="Port" Display="always" Required="true" Mask="false">30000-30099</Config>
 
   <Config Name="Database URL" Target="DATABASE_URL" Default="" Mode="" Description="Postgres connection string. Example: postgres://user:pass@host:5432/dbname" Type="Variable" Display="always" Required="true" Mask="true"/>
-  <Config Name="Public App URL" Target="NEXT_PUBLIC_APP_URL" Default="http://YOUR-UNRAID-IP:3000" Mode="" Description="External URL of the dashboard as reached by agents/browsers. Used in the one-command install script." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="Public App URL" Target="NEXT_PUBLIC_APP_URL" Default="http://YOUR-UNRAID-IP:3000" Mode="" Description="External URL of the dashboard as reached by agents/browsers. Used in the one-command install string." Type="Variable" Display="always" Required="true" Mask="false"/>
   <Config Name="Public Agent WS URL" Target="NEXT_PUBLIC_AGENT_WS_URL" Default="ws://YOUR-UNRAID-IP:3001" Mode="" Description="External URL of the WebSocket server. In production put a reverse proxy in front and use wss://." Type="Variable" Display="always" Required="true" Mask="false"/>
+  <Config Name="Internal API key" Target="INTERNAL_API_KEY" Default="" Mode="" Description="Shared secret between the Next.js and ws-server processes. Any long random string; keep identical across restarts." Type="Variable" Display="always" Required="true" Mask="true"/>
+  <Config Name="Relay public hostname" Target="RELAY_PUBLIC_HOSTNAME" Default="" Mode="" Description="Hostname players dial to reach game servers. Defaults to the host part of Public App URL." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="External port range start" Target="EXTERNAL_PORT_START" Default="30000" Mode="" Description="First port in the TCP relay range. If you change this, port-forward the same range." Type="Variable" Display="advanced" Required="false" Mask="false">30000</Config>
+  <Config Name="External port range size" Target="EXTERNAL_PORT_COUNT" Default="100" Mode="" Description="How many ports to allocate to the relay pool." Type="Variable" Display="advanced" Required="false" Mask="false">100</Config>
 </Container>

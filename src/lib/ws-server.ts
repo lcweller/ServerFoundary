@@ -18,6 +18,11 @@ import {
   sendCommand,
 } from "@/lib/agent-hub";
 import { hashToken, SESSION_COOKIE } from "@/lib/auth";
+import {
+  deliverToExternal,
+  closeExternal,
+  resendTunnelsForHost,
+} from "@/lib/tunnel-manager";
 
 type AgentMessage =
   | {
@@ -65,6 +70,20 @@ type AgentMessage =
         port: number;
         startupCommand: string;
       }>;
+    }
+  | {
+      // Agent → platform: bytes from the local game-server socket for
+      // a specific in-flight connection.
+      type: "tunnel_data";
+      tunnelId: string;
+      connId: string;
+      b64: string;
+    }
+  | {
+      // Agent → platform: the local-side TCP socket just closed.
+      type: "tunnel_close";
+      tunnelId: string;
+      connId: string;
     };
 
 let started = false;
@@ -189,6 +208,16 @@ async function handleAgentConnection(ws: WebSocket) {
 
   console.log(`[agent] connected host=${hostId}`);
 
+  // The agent just came up with no in-flight connId state. Resync the
+  // public TCP listeners and tell the agent to prepare local dialers for
+  // each of its host's tunnels. (Idempotent on both sides.)
+  resendTunnelsForHost(hostId).catch((err) =>
+    console.warn(
+      `[tunnel] resendTunnelsForHost(${hostId}) failed:`,
+      (err as Error).message,
+    ),
+  );
+
   ws.on("message", async (raw) => {
     let msg: AgentMessage;
     try {
@@ -290,6 +319,16 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
     case "adopt_servers": {
       if (!Array.isArray(msg.servers) || msg.servers.length === 0) break;
       await adoptServers(hostId, msg.servers);
+      break;
+    }
+    case "tunnel_data": {
+      // Agent is sending bytes that came out of its local game-server
+      // socket. Route them back to the corresponding public TCP client.
+      deliverToExternal(msg.tunnelId, msg.connId, msg.b64);
+      break;
+    }
+    case "tunnel_close": {
+      closeExternal(msg.tunnelId, msg.connId);
       break;
     }
   }

@@ -14,6 +14,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { existsSync, mkdirSync, readFileSync } from "fs";
 import { homedir, hostname, networkInterfaces, totalmem, uptime, freemem, cpus, release, platform as osPlatform } from "os";
 import { promises as fs } from "fs";
+import * as net from "net";
 import * as path from "path";
 import WebSocket from "ws";
 
@@ -734,6 +735,36 @@ class AgentConnection {
           log("warn", "Host was removed from dashboard. Shutting down.");
           process.exit(0);
           break;
+        case "begin_tunnel": {
+          const t = msg.tunnel as
+            | { id: string; gameServerId: string; internalPort: number }
+            | undefined;
+          if (t) this.beginTunnel(t);
+          break;
+        }
+        case "end_tunnel":
+          this.endTunnel(String(msg.gameServerId ?? ""));
+          break;
+        case "tunnel_open":
+          this.tunnelOpen(
+            String(msg.tunnelId ?? ""),
+            String(msg.connId ?? ""),
+            Number(msg.internalPort ?? 0),
+          );
+          break;
+        case "tunnel_data":
+          this.tunnelData(
+            String(msg.tunnelId ?? ""),
+            String(msg.connId ?? ""),
+            String(msg.b64 ?? ""),
+          );
+          break;
+        case "tunnel_close":
+          this.tunnelClose(
+            String(msg.tunnelId ?? ""),
+            String(msg.connId ?? ""),
+          );
+          break;
         default:
           log("warn", "Unknown command:", type);
       }
@@ -989,6 +1020,104 @@ class AgentConnection {
       term.proc.kill("SIGTERM");
     } catch {}
     this.terminals.delete(sessionId);
+  }
+
+  // ---- Tunnel (ADR 0001 Option A) ------------------------------------
+  //
+  // Platform -> agent for lifecycle:
+  //   begin_tunnel      bind tunnel { id, gameServerId, internalPort }
+  //   end_tunnel        drop tunnel for gameServerId + close all socks
+  // Platform -> agent for traffic:
+  //   tunnel_open       { tunnelId, connId, internalPort } → dial localhost
+  //   tunnel_data       { tunnelId, connId, b64 }         → write to socket
+  //   tunnel_close      { tunnelId, connId }              → destroy socket
+  // Agent -> platform for traffic: same tunnel_data / tunnel_close shapes.
+
+  private tunnelInternalPort = new Map<string, number>(); // tunnelId -> port
+  private tunnelOfServer = new Map<string, string>(); // gameServerId -> tunnelId
+  private tunnelSockets = new Map<string, Map<string, net.Socket>>(); // tunnelId -> connId -> socket
+
+  private beginTunnel(t: {
+    id: string;
+    gameServerId: string;
+    internalPort: number;
+  }) {
+    this.tunnelInternalPort.set(t.id, t.internalPort);
+    this.tunnelOfServer.set(t.gameServerId, t.id);
+    if (!this.tunnelSockets.has(t.id)) this.tunnelSockets.set(t.id, new Map());
+  }
+
+  private endTunnel(gameServerId: string) {
+    const tid = this.tunnelOfServer.get(gameServerId);
+    if (!tid) return;
+    this.tunnelOfServer.delete(gameServerId);
+    this.tunnelInternalPort.delete(tid);
+    const conns = this.tunnelSockets.get(tid);
+    if (conns) {
+      for (const s of conns.values()) {
+        try {
+          s.destroy();
+        } catch {}
+      }
+      this.tunnelSockets.delete(tid);
+    }
+  }
+
+  private tunnelOpen(tunnelId: string, connId: string, internalPort: number) {
+    if (!tunnelId || !connId || !internalPort) return;
+    const socket = net.createConnection({
+      host: "127.0.0.1",
+      port: internalPort,
+    });
+    socket.on("connect", () => {
+      // no-op — first bytes either direction confirm it works
+    });
+    socket.on("data", (chunk) => {
+      this.send({
+        type: "tunnel_data",
+        tunnelId,
+        connId,
+        b64: chunk.toString("base64"),
+      });
+    });
+    const forwardClosed = () => {
+      const m = this.tunnelSockets.get(tunnelId);
+      if (!m?.delete(connId)) return;
+      this.send({ type: "tunnel_close", tunnelId, connId });
+    };
+    socket.on("end", forwardClosed);
+    socket.on("close", forwardClosed);
+    socket.on("error", (err) => {
+      log(
+        "warn",
+        `[tunnel ${tunnelId}/${connId}] dial ${internalPort} failed:`,
+        err.message,
+      );
+    });
+    let m = this.tunnelSockets.get(tunnelId);
+    if (!m) {
+      m = new Map();
+      this.tunnelSockets.set(tunnelId, m);
+    }
+    m.set(connId, socket);
+  }
+
+  private tunnelData(tunnelId: string, connId: string, b64: string) {
+    const sock = this.tunnelSockets.get(tunnelId)?.get(connId);
+    if (!sock || sock.destroyed) return;
+    try {
+      sock.write(Buffer.from(b64, "base64"));
+    } catch {}
+  }
+
+  private tunnelClose(tunnelId: string, connId: string) {
+    const m = this.tunnelSockets.get(tunnelId);
+    const sock = m?.get(connId);
+    if (!sock) return;
+    m!.delete(connId);
+    try {
+      sock.end();
+    } catch {}
   }
 }
 

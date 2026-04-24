@@ -1,6 +1,6 @@
 # ADR 0001 — Game traffic transport for the MVP
 
-Status: **open — awaiting user decision**
+Status: **accepted — Option A shipped**
 Supersedes: nothing
 Related: PROJECT.md §0.2, §2.4, §3.5, §7.2, §11 step 9
 
@@ -111,14 +111,17 @@ critical path.
 
 ## Decision
 
-**Pending user input.**
+**Option A — in-container TCP relay through the existing agent WebSocket.**
 
-Recommendation: **Option A** for MVP. It hits the critical-path test, is
-consistent with §0.5 and §7.1, and the abstraction survives the
-eventual move to §7.2's VPS-based UDP relay.
+Consistent with §0.5 ("self-hosted on Unraid, zero additional infra cost")
+and §7.1 (<$15/year hard infra budget). The relay multiplexes many TCP
+connections per agent over the already-authenticated WebSocket; no new
+trust channel is introduced.
 
-If Landon is unable or unwilling to port-forward the relay range on his
-home ISP, fall back to Option B immediately.
+When the v2 WireGuard relay lands (§7.2) it will plug in as a second
+`provider` in the `tunnels` table. The game-server deploy flow, UI, and
+agent code do not need to change for that swap — only the specific
+`beginTunnel` / `endTunnel` implementation that backs a given provider.
 
 ## Consequences (for Option A, if chosen)
 
@@ -144,3 +147,61 @@ Independent of which option is chosen, the data model is identical:
 
 Shipped in the same PR as this ADR so the UI has somewhere to hang the
 "Public address" row.
+
+## Implementation notes (Option A)
+
+Ports and code:
+
+- `src/lib/tunnels.ts` — allocator. Picks the lowest free port in
+  `[EXTERNAL_PORT_START, EXTERNAL_PORT_START + EXTERNAL_PORT_COUNT - 1]`
+  per config. Default 30000-30099.
+- `src/lib/tunnel-manager.ts` — server-side multiplexer. One TCP
+  listener per tunnel. Per-conn `connId` keys track inbound sockets.
+  Bytes forward over the existing agent WS as `tunnel_*` messages.
+  Listeners re-bind on ws-server startup via `resumeAllTunnels`, and on
+  every agent reconnect the platform resends `begin_tunnel` for each of
+  the host's tunnels (`resendTunnelsForHost`).
+- `agent/agent.ts` — mirror handlers. On `tunnel_open`, dials
+  `localhost:<internal>` and pipes bytes both ways.
+- `src/app/api/hosts/[id]/game-servers/route.ts` — on deploy, allocates
+  a tunnel row, dispatches `begin_tunnel` alongside `deploy_game_server`.
+- `src/app/api/game-servers/[id]/route.ts` — on delete, dispatches
+  `end_tunnel` and lets the ON DELETE CASCADE on gameServerId clean up
+  the tunnels row.
+
+Message schema (all JSON over the existing WS):
+
+    platform → agent
+      begin_tunnel     { tunnel: { id, gameServerId, internalPort } }
+      end_tunnel       { gameServerId }
+      tunnel_open      { tunnelId, connId, internalPort }
+      tunnel_data      { tunnelId, connId, b64 }
+      tunnel_close     { tunnelId, connId }
+
+    agent → platform
+      tunnel_data      { tunnelId, connId, b64 }
+      tunnel_close     { tunnelId, connId }
+
+Payloads are base64 JSON for now — uniform with the rest of our agent
+protocol. Binary WS frames are an optimisation if profiling shows the
+~33 % b64 bloat matters; Minecraft traffic volume is well under that
+concern.
+
+Operator requirements:
+
+- One-time port-forward on the Unraid router for the relay range
+  (default `30000-30099` TCP). Required so a friend on a different
+  network can reach a hosted Minecraft server.
+- `INTERNAL_API_KEY` env var set to any long random string and
+  identical across the Next.js process and ws-server process so
+  cross-process dispatch works.
+
+Known limitations:
+
+- TCP only. UDP games wait on §7.2's WireGuard relay.
+- Bandwidth ceiling = the operator's home uplink. Fine for a dozen
+  Minecraft servers; the VPS alternative (Option B) is the upgrade path
+  once that's insufficient.
+- Agent restarts drop all active connections. Players reconnect; the
+  resync handshake on reconnect doesn't try to preserve TCP state
+  (which we can't, anyway).

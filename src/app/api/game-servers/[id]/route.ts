@@ -20,11 +20,19 @@ export async function DELETE(
     .limit(1);
   if (!server) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // Tear down the external tunnel first so the ws-server releases the
+  // TCP listener port before the agent stops the game process.
+  await dispatchCommand(server.hostId, {
+    type: "end_tunnel",
+    gameServerId: id,
+  });
+
   await dispatchCommand(server.hostId, {
     type: "delete_game_server",
     gameServerId: id,
   });
 
+  // Tunnels row is removed by the ON DELETE CASCADE on gameServerId.
   await db.delete(gameServers).where(eq(gameServers.id, id));
   return NextResponse.json({ ok: true });
 }

@@ -34,6 +34,9 @@ services:
     ports:
       - "3000:3000"
       - "3001:3001"
+      # External TCP relay range — players connect here (ADR 0001
+      # Option A). Must be port-forwarded on the operator's router.
+      - "30000-30099:30000-30099"
 
 volumes:
   postgres_data:

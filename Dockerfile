@@ -88,6 +88,14 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint
 RUN chmod +x /usr/local/bin/entrypoint
 
 USER node
-EXPOSE 3000 3001
+# 3000 = dashboard HTTP, 3001 = agent/terminal WS.
+# 30000-30099 = default external TCP relay range (ADR 0001 Option A).
+# These need to be published at `docker run -p 30000-30099:30000-30099`
+# and port-forwarded on the platform operator's router for a friend on
+# a different network to reach a hosted game server. Re-set both EXTERNAL_*
+# env vars if you change the range.
+EXPOSE 3000 3001 30000-30099
+ENV EXTERNAL_PORT_START=30000
+ENV EXTERNAL_PORT_COUNT=100
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint"]

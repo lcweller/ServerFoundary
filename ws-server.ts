@@ -3,6 +3,9 @@
 import { createServer, IncomingMessage, ServerResponse } from "http";
 import { initWsServer } from "./src/lib/ws-server";
 import { sendCommand, isAgentConnectedLocal } from "./src/lib/agent-hub";
+import { resumeAllTunnels } from "./src/lib/tunnel-manager";
+import { db } from "./src/db";
+import { hosts } from "./src/db/schema";
 
 const port = Number(process.env.AGENT_WS_PORT ?? 3001);
 const hostname = process.env.AGENT_WS_HOSTNAME ?? "0.0.0.0";
@@ -66,11 +69,21 @@ const server = createServer((req, res) => {
 
 initWsServer(server);
 
-server.listen(port, hostname, () => {
+server.listen(port, hostname, async () => {
   console.log(`[ws] listening on ${hostname}:${port}`);
   console.log(`[ws] agent endpoint:    ws://${hostname}:${port}/api/v1/agent/ws`);
   console.log(`[ws] terminal endpoint: ws://${hostname}:${port}/api/v1/terminal/<hostId>`);
   if (!internalKey) {
     console.warn("[ws] INTERNAL_API_KEY is not set — dashboard → agent commands will fail.");
+  }
+
+  // Resume every tunnel we've previously allocated. Listener binds are
+  // idempotent, so if an agent reconnects before we finish here nothing
+  // breaks — handleAgentConnection also calls resendTunnelsForHost.
+  try {
+    const rows = await db.select({ id: hosts.id }).from(hosts);
+    await resumeAllTunnels(rows.map((r) => r.id));
+  } catch (err) {
+    console.warn("[tunnel] resumeAllTunnels failed:", (err as Error).message);
   }
 });

@@ -5,6 +5,7 @@ import { gameServers, hosts, supportedGames, gameServerLogs, tunnels } from "@/d
 import { getCurrentUser } from "@/lib/auth";
 import { dispatchCommand } from "@/lib/agent-hub";
 import { resolveEgg, type EggJson, type EggInstall } from "@/lib/eggs";
+import { allocateTunnel } from "@/lib/tunnels";
 
 export async function GET(
   _req: NextRequest,
@@ -137,6 +138,22 @@ export async function POST(
     }
   }
 
+  // Allocate the external-facing TCP relay entry (ADR 0001 Option A).
+  // The tunnels row is written now so the UI can display the public
+  // address as soon as the deploy POST returns. The ws-server TCP
+  // listener binds on `begin_tunnel` below.
+  let tunnel: Awaited<ReturnType<typeof allocateTunnel>> | null = null;
+  try {
+    tunnel = await allocateTunnel(server.id);
+  } catch (err) {
+    await db.insert(gameServerLogs).values({
+      gameServerId: server.id,
+      source: "system",
+      level: "warn",
+      message: `Tunnel allocation failed: ${(err as Error).message}`,
+    });
+  }
+
   const delivered = await dispatchCommand(id, {
     type: "deploy_game_server",
     gameServer: {
@@ -162,6 +179,21 @@ export async function POST(
       level: "warn",
       message:
         "Host agent is offline. Deployment will start once the agent reconnects.",
+    });
+  }
+
+  // Kick the relay: have the ws-server bind the public port and ask the
+  // agent to stand up its local-side dialer. Independent of the installer
+  // having finished — first clients just won't get a TCP response from
+  // the not-yet-running game server until it's up.
+  if (tunnel) {
+    await dispatchCommand(id, {
+      type: "begin_tunnel",
+      tunnel: {
+        id: tunnel.id,
+        gameServerId: server.id,
+        internalPort: server.port,
+      },
     });
   }
 

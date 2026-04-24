@@ -24,7 +24,7 @@ PROJECT.md §11 lists 19 MVP steps. Status:
 | 6 | Dashboard + live metrics sparklines | ✅ — sparklines accrete client-side; no historical aggregation yet |
 | 7 | Host detail Overview | ✅ |
 | 8 | Linux install script | ✅ — `public/install.sh` |
-| 9 | **Cloudflare Tunnel for game traffic** | ❌ **Not done.** This is the §11 "gate" — if a friend on a different network can't reach a game hostname, nothing else matters. Currently game ports are opened via `ufw allow`, violating §0.2. |
+| 9 | **Relay for game traffic (§2.4)** | ✅ via ADR 0001 Option A — in-container TCP relay through the existing agent WS. Players dial `RELAY_PUBLIC_HOSTNAME:30000-30099`. Requires a one-time port-forward of that range on the platform operator's router. UDP still waits on §7.2's WireGuard relay. |
 | 10 | Minecraft deployment | ❌ Not done. Catalog has Valheim/CS:GO/Rust (mostly UDP, wrong for MVP) |
 | 11 | Lifecycle controls | ✅ |
 | 12 | Logs | ✅ |
@@ -50,7 +50,7 @@ migration target documented and will be revisited as a dedicated phase.
 | Database | Supabase Postgres (§0.5, §2.1) | Vanilla Postgres via Drizzle | Faster bootstrap; no external SaaS dependency during prototyping. Migration is mostly a connection-string swap. |
 | Auth | Supabase Auth (§2.1, §3.1) | Custom bcrypt + session cookies (`src/lib/auth.ts`) | Wanted auth working before an external dep was introduced. Migrating is a bigger job — every protected page + API route uses `getCurrentUser()`. |
 | Agent language | Go (§0.3) | Node.js/TypeScript, esbuild bundle | Faster to prototype, shared types with server, no native-module pain. Go rewrite is Phase 10. |
-| Game tunnel | Cloudflare Tunnel per server (§2.4) | `ufw allow <port>` on the host | Not compliant with §0.2. Next phase. |
+| Game tunnel | Cloudflare Tunnel per server (§2.4) | In-container TCP relay over the existing WS (ADR 0001 Option A) | PROJECT.md §2.4's CF Tunnel assumption doesn't survive first contact — CF's free tier only proxies HTTP/S. See /docs/decisions/0001. |
 | Deploy target | Minecraft Java first (§3.5) | Valheim / CS:GO / Rust / Project Zomboid | Most of the current catalog is UDP — won't work with Cloudflare Tunnel. Must prune and add Minecraft Java. |
 
 See `/docs/decisions/` (to be created as we resolve migrations).
@@ -145,6 +145,11 @@ by the agent, not an npm dep.
   ws-server process for cross-process command dispatch
 - `SESSION_COOKIE_SECURE` — `true` to mark the auth cookie Secure (auto-
   inferred when `NEXT_PUBLIC_APP_URL` is https://)
+- `EXTERNAL_PORT_START`, `EXTERNAL_PORT_COUNT` — the TCP port range the
+  in-container relay binds for game traffic (default 30000-30099). Must
+  be port-forwarded on the operator's router.
+- `RELAY_PUBLIC_HOSTNAME` — hostname players dial to reach a game server.
+  Defaults to the host part of `NEXT_PUBLIC_APP_URL`.
 
 See `.env.example` for the canonical list.
 
