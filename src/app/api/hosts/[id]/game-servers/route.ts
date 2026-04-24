@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { gameServers, hosts, supportedGames, gameServerLogs } from "@/db/schema";
+import { gameServers, hosts, supportedGames, gameServerLogs, tunnels } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { dispatchCommand } from "@/lib/agent-hub";
 import { resolveEgg, type EggJson, type EggInstall } from "@/lib/eggs";
@@ -21,13 +21,24 @@ export async function GET(
     .limit(1);
   if (!host) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
+  // Left join tunnels so the UI can display public address where it
+  // exists and "Not yet published" where it doesn't.
   const rows = await db
-    .select()
+    .select({
+      gs: gameServers,
+      tunnel: tunnels,
+    })
     .from(gameServers)
+    .leftJoin(tunnels, eq(tunnels.gameServerId, gameServers.id))
     .where(eq(gameServers.hostId, id))
     .orderBy(gameServers.createdAt);
 
-  return NextResponse.json({ gameServers: rows });
+  return NextResponse.json({
+    gameServers: rows.map((r) => ({
+      ...r.gs,
+      tunnel: r.tunnel ?? null,
+    })),
+  });
 }
 
 export async function POST(

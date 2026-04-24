@@ -108,6 +108,34 @@ export const supportedGames = pgTable("supported_games", {
   protocol: text("protocol").notNull().default("tcp"),
 });
 
+/**
+ * Tracks the public address a player uses to reach a game server. One
+ * row per game_server; the provider column makes room for the eventual
+ * WireGuard / VPS relay transport alongside the MVP in-container relay.
+ *
+ * Specced in PROJECT.md §4. The transport decision lives in
+ * /docs/decisions/0001-game-traffic-transport.md.
+ */
+export const tunnels = pgTable("tunnels", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameServerId: uuid("game_server_id")
+    .notNull()
+    .unique()
+    .references(() => gameServers.id, { onDelete: "cascade" }),
+  // "inproc_tcp_relay" (Option A) | "cf_tunnel" | "wireguard_vps" | …
+  provider: text("provider").notNull().default("inproc_tcp_relay"),
+  // Public hostname a player dials. For the in-container relay this is
+  // the dashboard's hostname. For cf_tunnel this is the per-server CNAME.
+  externalHostname: text("external_hostname"),
+  // Public port at externalHostname. For cf_tunnel this is 443 / null.
+  externalPort: integer("external_port"),
+  status: text("status").notNull().default("pending"),
+  lastConnectedAt: timestamp("last_connected_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export type User = typeof users.$inferSelect;
 export type Host = typeof hosts.$inferSelect;
 export type GameServer = typeof gameServers.$inferSelect;
@@ -115,6 +143,7 @@ export type GameServerLog = typeof gameServerLogs.$inferSelect;
 export type SupportedGame = typeof supportedGames.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type EnrollmentToken = typeof enrollmentTokens.$inferSelect;
+export type Tunnel = typeof tunnels.$inferSelect;
 
 /**
  * Early-access signups collected from the public landing page.

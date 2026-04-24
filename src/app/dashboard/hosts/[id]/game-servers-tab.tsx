@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Host, GameServer } from "@/db/schema";
+import type { Host, GameServer, Tunnel } from "@/db/schema";
+
+/** Game-server row as returned by GET /api/hosts/:id/game-servers —
+ *  extended with the joined tunnel row (nullable while the transport
+ *  isn't provisioned yet). */
+type GameServerWithTunnel = GameServer & { tunnel: Tunnel | null };
 import { HxCard, HxCardHeader } from "@/components/hex/card";
 import { HxBadge } from "@/components/hex/badge";
 import { HxButton } from "@/components/hex/button";
@@ -18,7 +23,7 @@ export function GameServersTab({
   host: Host & { effectiveStatus: "online" | "offline" | "connecting" };
   games: Game[];
 }) {
-  const [servers, setServers] = useState<GameServer[]>([]);
+  const [servers, setServers] = useState<GameServerWithTunnel[]>([]);
   const [loading, setLoading] = useState(true);
   const [deployOpen, setDeployOpen] = useState(false);
 
@@ -128,7 +133,7 @@ function ServerRow({
   onAct,
   onDelete,
 }: {
-  server: GameServer;
+  server: GameServerWithTunnel;
   gameName: string;
   hostOnline: boolean;
   onAct: (a: "start" | "stop" | "restart") => void;
@@ -162,6 +167,7 @@ function ServerRow({
         <div className="mt-0.5 truncate font-mono text-[11.5px] text-[var(--hx-muted-fg)]">
           {gameName} · port {server.port}
         </div>
+        <PublicAddress tunnel={server.tunnel} />
       </div>
       <div className="w-36">
         <div className="flex justify-between font-mono text-[11px]">
@@ -367,6 +373,53 @@ function DeployDialog({
           </HxButton>
         </div>
       </div>
+    </div>
+  );
+}
+
+
+/**
+ * Shows the external address a player connects to. Null tunnel renders
+ * a muted "Not yet published" pill — the in-container relay (ADR 0001
+ * Option A) or the v2 WireGuard relay will back-fill this row.
+ */
+function PublicAddress({ tunnel }: { tunnel: Tunnel | null }) {
+  if (!tunnel || !tunnel.externalHostname) {
+    return (
+      <div
+        className="mt-1 flex items-center gap-1.5 font-mono text-[11px]"
+        style={{ color: "var(--hx-muted-fg)" }}
+        title="A public address for this game server is provisioned once the platform relay is configured. See docs/decisions/0001-game-traffic-transport.md."
+      >
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full"
+          style={{ background: "var(--hx-border-strong)" }}
+        />
+        Not yet published
+      </div>
+    );
+  }
+  const addr = tunnel.externalPort
+    ? `${tunnel.externalHostname}:${tunnel.externalPort}`
+    : tunnel.externalHostname;
+  return (
+    <div
+      className="mt-1 flex items-center gap-1.5 font-mono text-[11px]"
+      style={{ color: "var(--hx-accent-fg)" }}
+    >
+      <span
+        className="inline-block h-1.5 w-1.5 rounded-full"
+        style={{ background: "var(--hx-accent)" }}
+      />
+      <span className="truncate">{addr}</span>
+      <button
+        type="button"
+        onClick={() => void navigator.clipboard?.writeText(addr)}
+        className="ml-1 text-[var(--hx-muted-fg)] hover:text-[var(--hx-fg)]"
+        title="Copy"
+      >
+        <HxIcon.copy size={11} />
+      </button>
     </div>
   );
 }
