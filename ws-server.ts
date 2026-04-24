@@ -4,6 +4,7 @@ import { createServer, IncomingMessage, ServerResponse } from "http";
 import { initWsServer } from "./src/lib/ws-server";
 import { sendCommand, isAgentConnectedLocal } from "./src/lib/agent-hub";
 import { resumeAllTunnels } from "./src/lib/tunnel-manager";
+import { pruneOldMetrics } from "./src/lib/metrics";
 import { db } from "./src/db";
 import { hosts } from "./src/db/schema";
 
@@ -86,4 +87,22 @@ server.listen(port, hostname, async () => {
   } catch (err) {
     console.warn("[tunnel] resumeAllTunnels failed:", (err as Error).message);
   }
+
+  // Metrics retention — minutely >3d and hourly >30d get pruned (§3.3).
+  // Run once on boot, then every 6h. Amortised cost is tiny compared to
+  // the insert volume.
+  const prune = async () => {
+    try {
+      const res = await pruneOldMetrics();
+      if (res.minutelyDeleted + res.hourlyDeleted > 0) {
+        console.log(
+          `[metrics] pruned ${res.minutelyDeleted} minutely + ${res.hourlyDeleted} hourly rows`,
+        );
+      }
+    } catch (err) {
+      console.warn("[metrics] prune failed:", (err as Error).message);
+    }
+  };
+  prune();
+  setInterval(prune, 6 * 60 * 60 * 1000).unref();
 });

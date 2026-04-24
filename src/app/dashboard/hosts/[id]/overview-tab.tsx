@@ -7,6 +7,7 @@ import { Sparkline } from "@/components/hex/sparkline";
 import { HxIcon, type HxIconName } from "@/components/hex/icons";
 import { useRollingSeries } from "@/components/hex/use-rolling-series";
 import { uptimeLabel } from "@/lib/format";
+import { MetricsHistory } from "./metrics-history";
 
 export function OverviewTab({ host }: { host: Host }) {
   const m = (host.metrics as Metrics | null) ?? null;
@@ -93,6 +94,9 @@ export function OverviewTab({ host }: { host: Host }) {
         />
       </div>
 
+      {/* Persisted history chart (§3.3 — minutely + hourly aggregates). */}
+      <MetricsHistory hostId={host.id} />
+
       {/* Hardware detail */}
       <div
         className="grid gap-[var(--hx-gap-md)]"
@@ -102,7 +106,7 @@ export function OverviewTab({ host }: { host: Host }) {
           <div className="mb-3 flex items-baseline justify-between">
             <div>
               <div className="hx-mono-tag text-[var(--hx-muted-fg)]">
-                CPU · last 5m
+                CPU · live (rolling)
               </div>
               <div
                 className="mt-1 text-[24px] font-medium"
@@ -115,7 +119,7 @@ export function OverviewTab({ host }: { host: Host }) {
           <Sparkline
             data={cpuSeries}
             width={620}
-            height={140}
+            height={120}
             color="var(--hx-accent)"
           />
         </HxCard>

@@ -23,6 +23,7 @@ import {
   closeExternal,
   resendTunnelsForHost,
 } from "@/lib/tunnel-manager";
+import { recordHeartbeat } from "@/lib/metrics";
 
 type AgentMessage =
   | {
@@ -275,6 +276,12 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
             .where(eq(gameServers.id, gs.id));
         }
       }
+      // Fire-and-forget: roll this sample into the minutely + hourly
+      // aggregate tables. A DB hiccup shouldn't disturb the live
+      // heartbeat pipeline (§3.3).
+      recordHeartbeat(hostId, msg.metrics).catch((err) =>
+        console.warn("[metrics] recordHeartbeat failed:", (err as Error).message),
+      );
       break;
     }
     case "game_server_status": {

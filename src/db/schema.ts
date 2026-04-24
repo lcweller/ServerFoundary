@@ -6,6 +6,8 @@ import {
   boolean,
   integer,
   jsonb,
+  real,
+  primaryKey,
 } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
@@ -162,3 +164,53 @@ export const waitlistSignups = pgTable("waitlist_signups", {
 });
 
 export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
+
+/**
+ * Per-host metrics aggregated in time buckets (PROJECT.md §3.3, §4).
+ *
+ * Two granularities so the "last hour" view is smooth without paying
+ * 60-sample read-amplification on the 30-day view:
+ *
+ *   host_metrics_minutely — bucket per minute, retained ~3 days
+ *   host_metrics_hourly   — bucket per hour, retained 30 days
+ *
+ * Each heartbeat UPSERTs into both tables, adding to `samples`,
+ * `cpu_sum`, `mem_pct_sum` and taking MAX() over `*_max`. Readers
+ * compute avgs as sum / samples; we never need floating-point
+ * rolling-mean arithmetic inside the INSERT.
+ */
+const metricsCols = {
+  samples: integer("samples").notNull(),
+  cpuSum: real("cpu_sum").notNull(),
+  cpuMax: real("cpu_max").notNull(),
+  memPctSum: real("mem_pct_sum").notNull(),
+  memPctMax: real("mem_pct_max").notNull(),
+  diskUsedGb: real("disk_used_gb"),
+  cpuTempMax: real("cpu_temp_max"),
+};
+
+export const hostMetricsMinutely = pgTable(
+  "host_metrics_minutely",
+  {
+    hostId: uuid("host_id")
+      .notNull()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    bucket: timestamp("bucket", { withTimezone: true }).notNull(),
+    ...metricsCols,
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.hostId, t.bucket] }) }),
+);
+
+export const hostMetricsHourly = pgTable(
+  "host_metrics_hourly",
+  {
+    hostId: uuid("host_id")
+      .notNull()
+      .references(() => hosts.id, { onDelete: "cascade" }),
+    bucket: timestamp("bucket", { withTimezone: true }).notNull(),
+    ...metricsCols,
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.hostId, t.bucket] }) }),
+);
+
+export type HostMetricsRow = typeof hostMetricsHourly.$inferSelect;
