@@ -8,6 +8,13 @@
       "when": 1776805899921,
       "tag": "0000_red_havok",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1777064349688,
+      "tag": "0001_lucky_frog_thor",
+      "breakpoints": true
     }
   ]
 }

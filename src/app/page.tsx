@@ -6,6 +6,7 @@ import { HxBadge } from "@/components/hex/badge";
 import { HexLogo, HexWordmark } from "@/components/hex/logo";
 import { HxGameTile } from "@/components/hex/game-tile";
 import { HxIcon } from "@/components/hex/icons";
+import { WaitlistForm } from "./waitlist-form";
 
 export default async function LandingPage() {
   let games: { id: string; name: string; description: string | null }[] = [];
@@ -78,29 +79,26 @@ export default async function LandingPage() {
             Deploy Valheim, CS:GO, Project Zomboid, and more. No Linux
             experience required.
           </p>
-          <div className="mt-8 flex items-center justify-center gap-2.5">
-            <Link
-              href="/signup"
-              className="inline-flex h-10 items-center gap-1.5 rounded-lg border px-4 text-[14.5px] font-medium"
-              style={{
-                background: "var(--hx-fg)",
-                borderColor: "var(--hx-fg)",
-                color: "var(--hx-bg)",
-              }}
-            >
-              Create your account <HxIcon.arrowRight size={14} />
-            </Link>
-            <Link
-              href="#how-it-works"
-              className="inline-flex h-10 items-center rounded-lg border px-4 text-[14.5px] font-medium"
-              style={{
-                background: "var(--hx-bg)",
-                borderColor: "var(--hx-border)",
-                color: "var(--hx-fg)",
-              }}
-            >
-              See how it works
-            </Link>
+          <div className="mt-8 flex flex-col items-center gap-3">
+            <div className="flex w-full max-w-md justify-center">
+              <WaitlistForm source="landing-hero" />
+            </div>
+            <div className="flex items-center gap-2 text-[12.5px] text-[var(--hx-muted-fg)]">
+              <span>Already have an account?</span>
+              <Link
+                href="/login"
+                className="text-[var(--hx-accent-fg)] hover:underline"
+              >
+                Log in
+              </Link>
+              <span>·</span>
+              <Link
+                href="#how-it-works"
+                className="text-[var(--hx-muted-fg)] hover:text-[var(--hx-fg)]"
+              >
+                See how it works
+              </Link>
+            </div>
           </div>
         </section>
 
@@ -192,24 +190,18 @@ export default async function LandingPage() {
         {/* CTA */}
         <section className="py-24">
           <HxCard padding={40} className="text-center">
-            <h2 className="text-3xl font-semibold" style={{ letterSpacing: "-0.02em" }}>
-              Ready to start?
+            <h2
+              className="text-3xl font-semibold"
+              style={{ letterSpacing: "-0.02em" }}
+            >
+              Early access
             </h2>
-            <p className="mt-2 text-[14px] text-[var(--hx-muted-fg)]">
-              Sign up free. Link your first host in under five minutes.
+            <p className="mx-auto mt-2 max-w-xl text-[14px] text-[var(--hx-muted-fg)]">
+              We&apos;re launching in waves. Drop your email and we&apos;ll let
+              you in as soon as your spot opens up.
             </p>
-            <div className="mt-6">
-              <Link
-                href="/signup"
-                className="inline-flex h-10 items-center gap-1.5 rounded-lg border px-4 text-[14.5px] font-medium"
-                style={{
-                  background: "var(--hx-fg)",
-                  borderColor: "var(--hx-fg)",
-                  color: "var(--hx-bg)",
-                }}
-              >
-                Create your account <HxIcon.arrowRight size={14} />
-              </Link>
+            <div className="mt-6 flex justify-center">
+              <WaitlistForm source="landing-cta" />
             </div>
           </HxCard>
         </section>

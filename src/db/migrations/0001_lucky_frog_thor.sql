@@ -1,0 +1,9 @@
+CREATE TABLE "waitlist_signups" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"email" text NOT NULL,
+	"source" text,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"ip" text,
+	"user_agent" text,
+	CONSTRAINT "waitlist_signups_email_unique" UNIQUE("email")
+);

@@ -101,3 +101,21 @@ export type GameServerLog = typeof gameServerLogs.$inferSelect;
 export type SupportedGame = typeof supportedGames.$inferSelect;
 export type Session = typeof sessions.$inferSelect;
 export type EnrollmentToken = typeof enrollmentTokens.$inferSelect;
+
+/**
+ * Early-access signups collected from the public landing page.
+ * PROJECT.md §3.13. Kept separate from `users` so nothing that references
+ * `users` has to deal with rows that haven't gone through Supabase Auth.
+ */
+export const waitlistSignups = pgTable("waitlist_signups", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  email: text("email").notNull().unique(),
+  source: text("source"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  ip: text("ip"),
+  userAgent: text("user_agent"),
+});
+
+export type WaitlistSignup = typeof waitlistSignups.$inferSelect;
