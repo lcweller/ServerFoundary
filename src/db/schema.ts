@@ -255,3 +255,75 @@ export const auditEvents = pgTable("audit_events", {
 });
 
 export type AuditEvent = typeof auditEvents.$inferSelect;
+
+/**
+ * Per-game-server backup history (PROJECT.md §3.10).
+ *
+ * The MVP keeps backups *on the host's own disk* under
+ * `<SERVERS_DIR>/<game_server_id>/.gameserveros-backups/<backup_id>.tar.gz`.
+ * S3-compatible / Cloudflare R2 destinations are deferred — see CLAUDE.md
+ * "Known stack divergences" — but the schema reserves a `destination`
+ * column so the column doesn't have to be backfilled later.
+ *
+ * `status` lifecycle:
+ *   pending  →  running  →  success | failed
+ * A failed row keeps its `error` so the user can see why.
+ *
+ * `retention_until` is set at create time from the server's backup_config
+ * `retention_count`. The scheduler tick deletes rows older than the Nth
+ * most-recent successful backup, so retention is "keep last N", not a
+ * strict TTL — but this column lets a future tier-based plan (e.g. "keep
+ * weekly forever") layer on without a schema change.
+ */
+export const backups = pgTable("backups", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  gameServerId: uuid("game_server_id")
+    .notNull()
+    .references(() => gameServers.id, { onDelete: "cascade" }),
+  hostId: uuid("host_id")
+    .notNull()
+    .references(() => hosts.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  // "scheduled" or "manual" — drives the audit kind and the UI label.
+  trigger: text("trigger").notNull().default("manual"),
+  // "local" for the MVP on-disk store. Reserved values: "s3", "r2".
+  destination: text("destination").notNull().default("local"),
+  // Path on the host, relative to SERVERS_DIR/<gameServerId>. NULL until
+  // the agent reports the file written.
+  path: text("path"),
+  sizeBytes: integer("size_bytes"),
+  status: text("status").notNull().default("pending"),
+  error: text("error"),
+  startedAt: timestamp("started_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  completedAt: timestamp("completed_at", { withTimezone: true }),
+  retentionUntil: timestamp("retention_until", { withTimezone: true }),
+});
+
+/**
+ * Per-game-server backup schedule + retention.
+ *
+ * Schedule is intentionally simple for the MVP — `every_hours` ∈ [1, 168]
+ * — instead of a full cron. Cron syntax can land later as an additional
+ * column without breaking existing rows. `enabled=false` rows still hold
+ * the user's preferred values so toggling back on doesn't reset them.
+ */
+export const backupConfigs = pgTable("backup_configs", {
+  gameServerId: uuid("game_server_id")
+    .primaryKey()
+    .references(() => gameServers.id, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(false),
+  everyHours: integer("every_hours").notNull().default(24),
+  retentionCount: integer("retention_count").notNull().default(7),
+  // Last time the scheduler dispatched a backup for this server. NULL
+  // means "never" — used by the scheduler to decide whether the first
+  // run is due immediately or one interval from now.
+  lastRunAt: timestamp("last_run_at", { withTimezone: true }),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type Backup = typeof backups.$inferSelect;
+export type BackupConfig = typeof backupConfigs.$inferSelect;

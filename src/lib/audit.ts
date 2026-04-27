@@ -23,7 +23,11 @@ export type AuditKind =
   | "game_server_restart"
   | "game_server_delete"
   | "terminal_open"
-  | "terminal_close";
+  | "terminal_close"
+  | "backup_create"
+  | "backup_restore"
+  | "backup_delete"
+  | "backup_config_change";
 
 export function sourceIpFromRequest(req: NextRequest | Request): string | null {
   const h =

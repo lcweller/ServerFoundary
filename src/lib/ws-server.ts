@@ -25,6 +25,12 @@ import {
 } from "@/lib/tunnel-manager";
 import { recordHeartbeat } from "@/lib/metrics";
 import { recordAudit } from "@/lib/audit";
+import {
+  applyAgentBackupUpdate,
+  getBackupConfig,
+  pruneSuccessfulBackups,
+  startBackupScheduler,
+} from "@/lib/backups";
 
 type AgentMessage =
   | {
@@ -86,6 +92,25 @@ type AgentMessage =
       type: "tunnel_close";
       tunnelId: string;
       connId: string;
+    }
+  | {
+      // Agent → platform: backup lifecycle. `running` and `success|failed`
+      // are emitted from the agent during/after tar.gz creation.
+      type: "backup_status";
+      backupId: string;
+      gameServerId: string;
+      status: "running" | "success" | "failed";
+      path?: string;
+      sizeBytes?: number;
+      error?: string;
+    }
+  | {
+      // Agent → platform: restore lifecycle.
+      type: "backup_restore_status";
+      backupId: string;
+      gameServerId: string;
+      status: "running" | "success" | "failed";
+      error?: string;
     };
 
 let started = false;
@@ -110,6 +135,11 @@ export function initWsServer(server: {
 
   agentWss.on("connection", handleAgentConnection);
   terminalWss.on("connection", handleTerminalConnection);
+
+  // PROJECT.md §3.10 — fire scheduled backups from the ws-server process
+  // because that's where dispatchCommand can talk to live agents in
+  // memory (no internal-HTTP hop). One tick per minute.
+  startBackupScheduler();
 
   server.on("upgrade", async (req, socket, head) => {
     try {
@@ -363,6 +393,69 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
       closeExternal(msg.tunnelId, msg.connId);
       break;
     }
+    case "backup_status": {
+      try {
+        await applyAgentBackupUpdate({
+          backupId: msg.backupId,
+          status: msg.status,
+          path: msg.path ?? null,
+          sizeBytes: msg.sizeBytes ?? null,
+          error: msg.error ?? null,
+        });
+        if (msg.status === "success") {
+          // Apply retention asynchronously: list older successful rows
+          // beyond the configured count and dispatch delete_backup for
+          // each. Best-effort — don't break the success report.
+          applyRetentionAfterSuccess(msg.gameServerId).catch((err) =>
+            console.warn(
+              "[backups] retention failed:",
+              (err as Error).message,
+            ),
+          );
+        }
+      } catch (err) {
+        console.warn(
+          "[backups] applyAgentBackupUpdate failed:",
+          (err as Error).message,
+        );
+      }
+      break;
+    }
+    case "backup_restore_status": {
+      // The actual restart is driven by the agent; the platform just
+      // logs the lifecycle. The audit row was written when the operator
+      // hit "Restore" in the UI.
+      console.info(
+        `[backups] restore ${msg.status} for backup ${msg.backupId} on server ${msg.gameServerId}` +
+          (msg.error ? ` (${msg.error})` : ""),
+      );
+      break;
+    }
+  }
+}
+
+/**
+ * After a successful backup, prune older successful rows beyond the
+ * configured retention count and ask the agent to delete the files.
+ */
+async function applyRetentionAfterSuccess(gameServerId: string): Promise<void> {
+  const cfg = await getBackupConfig(gameServerId);
+  const removed = await pruneSuccessfulBackups(
+    gameServerId,
+    cfg.retentionCount,
+  );
+  if (removed.length === 0) return;
+  // Fan out delete_backup messages to the agent. We have to look up the
+  // hostId once; all rows for the same gameServerId share it.
+  const hostId = removed[0].hostId;
+  for (const row of removed) {
+    if (!row.path) continue;
+    sendCommand(hostId, {
+      type: "delete_backup",
+      gameServerId,
+      backupId: row.id,
+      path: row.path,
+    });
   }
 }
 

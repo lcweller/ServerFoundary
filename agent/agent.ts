@@ -765,6 +765,25 @@ class AgentConnection {
             String(msg.connId ?? ""),
           );
           break;
+        case "backup_game_server":
+          await this.backupServer(
+            String(msg.gameServerId ?? ""),
+            String(msg.backupId ?? ""),
+          );
+          break;
+        case "restore_game_server":
+          await this.restoreServer(
+            String(msg.gameServerId ?? ""),
+            String(msg.backupId ?? ""),
+            String(msg.path ?? ""),
+          );
+          break;
+        case "delete_backup":
+          await this.deleteBackup(
+            String(msg.gameServerId ?? ""),
+            String(msg.path ?? ""),
+          );
+          break;
         default:
           log("warn", "Unknown command:", type);
       }
@@ -938,6 +957,252 @@ class AgentConnection {
         log("warn", `Failed to remove ${server.dir}:`, (err as Error).message);
       }
       servers.delete(id);
+    }
+  }
+
+  /**
+   * Tar.gz the server directory (excluding the backups dir itself) and
+   * report size + path back to the platform. Best-effort: if tar is
+   * missing or the spawn fails we still send a `failed` status so the
+   * UI doesn't get stuck on "running".
+   */
+  private async backupServer(gameServerId: string, backupId: string) {
+    const server = servers.get(gameServerId);
+    if (!server || !backupId) {
+      this.send({
+        type: "backup_status",
+        backupId,
+        gameServerId,
+        status: "failed",
+        error: "Unknown game server",
+      });
+      return;
+    }
+    const backupsDir = path.join(server.dir, ".gameserveros-backups");
+    const fileRel = `.gameserveros-backups/${backupId}.tar.gz`;
+    const filePath = path.join(server.dir, fileRel);
+    try {
+      ensureDir(backupsDir);
+    } catch (err) {
+      this.send({
+        type: "backup_status",
+        backupId,
+        gameServerId,
+        status: "failed",
+        error: `mkdir failed: ${(err as Error).message}`,
+      });
+      return;
+    }
+    this.send({
+      type: "backup_status",
+      backupId,
+      gameServerId,
+      status: "running",
+    });
+    this.sendLog(
+      gameServerId,
+      "info",
+      "system",
+      `Starting backup → ${fileRel}`,
+    );
+    try {
+      // tar with -C parent so the archive contains <id>/... relative paths,
+      // making restore back into the same directory layout trivial. Exclude
+      // the backups dir itself so backups don't accumulate inside backups.
+      await new Promise<void>((resolve, reject) => {
+        const p = spawn(
+          "tar",
+          [
+            "-czf",
+            filePath,
+            "-C",
+            path.dirname(server.dir),
+            "--exclude",
+            `${path.basename(server.dir)}/.gameserveros-backups`,
+            path.basename(server.dir),
+          ],
+          { stdio: ["ignore", "pipe", "pipe"] },
+        );
+        p.stdout?.setEncoding("utf8");
+        p.stderr?.setEncoding("utf8");
+        p.stderr?.on("data", (d: string) =>
+          d
+            .split("\n")
+            .filter(Boolean)
+            .forEach((l) =>
+              this.sendLog(gameServerId, "warn", "system", `[tar] ${l}`),
+            ),
+        );
+        p.on("error", reject);
+        p.on("close", (code) =>
+          code === 0 ? resolve() : reject(new Error(`tar exited ${code}`)),
+        );
+      });
+      const stat = await fs.stat(filePath);
+      this.sendLog(
+        gameServerId,
+        "info",
+        "system",
+        `Backup complete (${(stat.size / 1_048_576).toFixed(1)} MiB)`,
+      );
+      this.send({
+        type: "backup_status",
+        backupId,
+        gameServerId,
+        status: "success",
+        path: fileRel,
+        sizeBytes: stat.size,
+      });
+    } catch (err) {
+      // Clean up a half-written archive so it doesn't masquerade as a
+      // valid backup later.
+      try {
+        await fs.unlink(filePath);
+      } catch {}
+      this.sendLog(
+        gameServerId,
+        "error",
+        "system",
+        `Backup failed: ${(err as Error).message}`,
+      );
+      this.send({
+        type: "backup_status",
+        backupId,
+        gameServerId,
+        status: "failed",
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  /**
+   * Restore: stop the server, replace the data dir from the chosen tar.gz,
+   * and start it back up. The tar created by `backupServer` contains the
+   * server's directory at top level, so we untar from one level up.
+   */
+  private async restoreServer(
+    gameServerId: string,
+    backupId: string,
+    relPath: string,
+  ) {
+    const server = servers.get(gameServerId);
+    if (!server || !relPath) {
+      this.send({
+        type: "backup_restore_status",
+        gameServerId,
+        backupId,
+        status: "failed",
+        error: "Unknown game server or path",
+      });
+      return;
+    }
+    const filePath = path.join(server.dir, relPath);
+    if (!existsSync(filePath)) {
+      this.send({
+        type: "backup_restore_status",
+        gameServerId,
+        backupId,
+        status: "failed",
+        error: "Backup file not found on disk",
+      });
+      return;
+    }
+    this.sendLog(
+      gameServerId,
+      "info",
+      "system",
+      `Restore starting from ${relPath}`,
+    );
+    try {
+      await this.stopServer(gameServerId);
+      // Wait briefly so the previous process unmaps any open files.
+      await new Promise((r) => setTimeout(r, 1000));
+      // Move the backups dir aside so we don't clobber it during extract.
+      const backupsDir = path.join(server.dir, ".gameserveros-backups");
+      const stash = path.join(
+        path.dirname(server.dir),
+        `.${path.basename(server.dir)}.backups.${Date.now()}`,
+      );
+      let moved = false;
+      try {
+        await fs.rename(backupsDir, stash);
+        moved = true;
+      } catch {}
+      // Wipe the dir (preserving the directory itself) by rm + mkdir.
+      // (The tar contains the dir at top level, so extraction recreates it.)
+      try {
+        await fs.rm(server.dir, { recursive: true, force: true });
+      } catch {}
+      ensureDir(server.dir);
+      await new Promise<void>((resolve, reject) => {
+        const p = spawn(
+          "tar",
+          ["-xzf", filePath, "-C", path.dirname(server.dir)],
+          { stdio: ["ignore", "pipe", "pipe"] },
+        );
+        p.on("error", reject);
+        p.on("close", (code) =>
+          code === 0 ? resolve() : reject(new Error(`tar exited ${code}`)),
+        );
+      });
+      // Restore the previously-stashed backups dir on top of the
+      // freshly-extracted tree so we don't lose backup history.
+      if (moved) {
+        try {
+          // Remove the backups dir from the just-extracted tarball if any
+          // (tar excluded it, but be defensive) and move the stash back.
+          await fs.rm(backupsDir, { recursive: true, force: true });
+          await fs.rename(stash, backupsDir);
+        } catch (err) {
+          log(
+            "warn",
+            `Failed to reattach backups dir during restore:`,
+            (err as Error).message,
+          );
+        }
+      }
+      this.send({
+        type: "backup_restore_status",
+        gameServerId,
+        backupId,
+        status: "success",
+      });
+      this.sendLog(gameServerId, "info", "system", `Restore complete; restarting`);
+      await this.startServer(gameServerId);
+    } catch (err) {
+      this.sendLog(
+        gameServerId,
+        "error",
+        "system",
+        `Restore failed: ${(err as Error).message}`,
+      );
+      this.send({
+        type: "backup_restore_status",
+        gameServerId,
+        backupId,
+        status: "failed",
+        error: (err as Error).message,
+      });
+    }
+  }
+
+  private async deleteBackup(gameServerId: string, relPath: string) {
+    const server = servers.get(gameServerId);
+    if (!server || !relPath) return;
+    // Refuse to follow paths that escape the server dir.
+    if (relPath.includes("..") || path.isAbsolute(relPath)) {
+      log("warn", `Refusing to delete backup at unsafe path: ${relPath}`);
+      return;
+    }
+    const filePath = path.join(server.dir, relPath);
+    try {
+      await fs.unlink(filePath);
+    } catch (err) {
+      log(
+        "warn",
+        `Failed to delete backup ${filePath}:`,
+        (err as Error).message,
+      );
     }
   }
 

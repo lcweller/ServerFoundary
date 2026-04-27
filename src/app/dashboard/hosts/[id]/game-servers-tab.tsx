@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Host, GameServer, Tunnel } from "@/db/schema";
+import type { Host, GameServer, Tunnel, Backup, BackupConfig } from "@/db/schema";
 
 /** Game-server row as returned by GET /api/hosts/:id/game-servers —
  *  extended with the joined tunnel row (nullable while the transport
@@ -13,6 +13,7 @@ import { HxButton } from "@/components/hex/button";
 import { HxIcon } from "@/components/hex/icons";
 import { HxGameTile } from "@/components/hex/game-tile";
 import { HxProgress } from "@/components/hex/progress";
+import { formatBytes, relativeTime } from "@/lib/format";
 
 type Game = { id: string; name: string; defaultPort: number };
 
@@ -139,6 +140,7 @@ function ServerRow({
   onAct: (a: "start" | "stop" | "restart") => void;
   onDelete: () => void;
 }) {
+  const [backupsOpen, setBackupsOpen] = useState(false);
   const tone =
     server.status === "running"
       ? "ok"
@@ -153,72 +155,342 @@ function ServerRow({
       : 0;
   return (
     <div
-      className="flex items-center gap-3 border-t px-[18px] py-[11px]"
+      className="border-t"
       style={{ borderColor: "var(--hx-border)" }}
     >
-      <HxGameTile gameId={server.gameId} size={36} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <div className="truncate text-[13px] font-medium">{server.name}</div>
-          <HxBadge tone={tone} size="sm">
-            {server.status}
-          </HxBadge>
+      <div className="flex items-center gap-3 px-[18px] py-[11px]">
+        <HxGameTile gameId={server.gameId} size={36} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className="truncate text-[13px] font-medium">{server.name}</div>
+            <HxBadge tone={tone} size="sm">
+              {server.status}
+            </HxBadge>
+          </div>
+          <div className="mt-0.5 truncate font-mono text-[11.5px] text-[var(--hx-muted-fg)]">
+            {gameName} · port {server.port}
+          </div>
+          <PublicAddress tunnel={server.tunnel} />
         </div>
-        <div className="mt-0.5 truncate font-mono text-[11.5px] text-[var(--hx-muted-fg)]">
-          {gameName} · port {server.port}
-        </div>
-        <PublicAddress tunnel={server.tunnel} />
-      </div>
-      <div className="w-36">
-        <div className="flex justify-between font-mono text-[11px]">
-          <span className="text-[var(--hx-muted-fg)]">players</span>
-          <span>
-            <span className="text-[var(--hx-accent-fg)]">
-              {server.playersOnline}
+        <div className="w-36">
+          <div className="flex justify-between font-mono text-[11px]">
+            <span className="text-[var(--hx-muted-fg)]">players</span>
+            <span>
+              <span className="text-[var(--hx-accent-fg)]">
+                {server.playersOnline}
+              </span>
+              <span className="text-[var(--hx-muted-fg)]">
+                /{server.maxPlayers}
+              </span>
             </span>
-            <span className="text-[var(--hx-muted-fg)]">
-              /{server.maxPlayers}
-            </span>
-          </span>
+          </div>
+          <HxProgress value={playerPct} color="var(--hx-accent)" className="mt-1" />
         </div>
-        <HxProgress value={playerPct} color="var(--hx-accent)" className="mt-1" />
+        <div className="flex gap-1.5">
+          <HxButton
+            size="sm"
+            variant="secondary"
+            icon="play"
+            disabled={!hostOnline || server.status === "running"}
+            onClick={() => onAct("start")}
+          >
+            Start
+          </HxButton>
+          <HxButton
+            size="sm"
+            variant="secondary"
+            icon="stop"
+            disabled={!hostOnline || server.status !== "running"}
+            onClick={() => onAct("stop")}
+          >
+            Stop
+          </HxButton>
+          <HxButton
+            size="sm"
+            variant="secondary"
+            icon="restart"
+            disabled={!hostOnline || server.status === "installing"}
+            onClick={() => onAct("restart")}
+          >
+            Restart
+          </HxButton>
+          <HxButton
+            size="sm"
+            variant="secondary"
+            icon="backups"
+            onClick={() => setBackupsOpen((v) => !v)}
+          >
+            Backups
+          </HxButton>
+          <HxButton
+            size="sm"
+            variant="danger"
+            icon="trash"
+            onClick={onDelete}
+          >
+            Delete
+          </HxButton>
+        </div>
       </div>
-      <div className="flex gap-1.5">
-        <HxButton
-          size="sm"
-          variant="secondary"
-          icon="play"
-          disabled={!hostOnline || server.status === "running"}
-          onClick={() => onAct("start")}
+      {backupsOpen && (
+        <BackupsPanel server={server} hostOnline={hostOnline} />
+      )}
+    </div>
+  );
+}
+
+function BackupsPanel({
+  server,
+  hostOnline,
+}: {
+  server: GameServerWithTunnel;
+  hostOnline: boolean;
+}) {
+  const [backups, setBackups] = useState<Backup[]>([]);
+  const [config, setConfig] = useState<BackupConfig | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const [a, b] = await Promise.all([
+        fetch(`/api/game-servers/${server.id}/backups`, { cache: "no-store" }),
+        fetch(`/api/game-servers/${server.id}/backup-config`, { cache: "no-store" }),
+      ]);
+      if (a.ok) {
+        const data = (await a.json()) as { backups: Backup[] };
+        setBackups(data.backups ?? []);
+      }
+      if (b.ok) {
+        const data = (await b.json()) as { config: BackupConfig };
+        setConfig(data.config);
+      }
+    } catch {}
+    setLoading(false);
+  }, [server.id]);
+
+  useEffect(() => {
+    load();
+    // Poll while running backups exist so UI catches up to the agent.
+    const t = setInterval(load, 4000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  async function backupNow() {
+    setBusy(true);
+    setError(null);
+    const res = await fetch(`/api/game-servers/${server.id}/backups`, {
+      method: "POST",
+    });
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(j.error ?? "Backup failed to start.");
+    }
+    setBusy(false);
+    load();
+  }
+
+  async function restore(b: Backup) {
+    if (
+      !confirm(
+        `Restore "${server.name}" from backup taken ${relativeTime(
+          Math.floor((Date.now() - new Date(b.startedAt).getTime()) / 1000),
+        )}? The server will be stopped, replaced, and restarted.`,
+      )
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    const res = await fetch(
+      `/api/game-servers/${server.id}/backups/${b.id}/restore`,
+      { method: "POST" },
+    );
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      setError(j.error ?? "Restore failed to start.");
+    }
+    setBusy(false);
+    load();
+  }
+
+  async function del(b: Backup) {
+    if (!confirm("Delete this backup? The file will be removed from disk.")) {
+      return;
+    }
+    setBusy(true);
+    await fetch(`/api/game-servers/${server.id}/backups/${b.id}`, {
+      method: "DELETE",
+    });
+    setBusy(false);
+    load();
+  }
+
+  async function patchConfig(patch: Partial<BackupConfig>) {
+    if (!config) return;
+    const next = { ...config, ...patch };
+    setConfig(next);
+    const res = await fetch(`/api/game-servers/${server.id}/backup-config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      // Roll back optimistic update.
+      setConfig(config);
+    }
+  }
+
+  return (
+    <div
+      className="border-t px-[18px] py-[14px]"
+      style={{
+        borderColor: "var(--hx-border)",
+        background: "var(--hx-chip)",
+      }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-[13px] font-medium">Backups</div>
+        <div className="flex items-center gap-3 text-[12px]">
+          {config && (
+            <>
+              <label className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={config.enabled}
+                  onChange={(e) => patchConfig({ enabled: e.target.checked })}
+                />
+                <span>Schedule</span>
+              </label>
+              <label className="flex items-center gap-1">
+                <span className="text-[var(--hx-muted-fg)]">every</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={config.everyHours}
+                  onChange={(e) =>
+                    patchConfig({ everyHours: Number(e.target.value) })
+                  }
+                  className="h-7 w-14 rounded-md border px-2 font-mono text-[12px]"
+                  style={{
+                    background: "var(--hx-bg)",
+                    borderColor: "var(--hx-border)",
+                    color: "var(--hx-fg)",
+                  }}
+                />
+                <span className="text-[var(--hx-muted-fg)]">h, keep</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={config.retentionCount}
+                  onChange={(e) =>
+                    patchConfig({ retentionCount: Number(e.target.value) })
+                  }
+                  className="h-7 w-14 rounded-md border px-2 font-mono text-[12px]"
+                  style={{
+                    background: "var(--hx-bg)",
+                    borderColor: "var(--hx-border)",
+                    color: "var(--hx-fg)",
+                  }}
+                />
+              </label>
+            </>
+          )}
+          <HxButton
+            size="sm"
+            variant="primary"
+            icon="backups"
+            disabled={busy || !hostOnline}
+            onClick={backupNow}
+          >
+            Back up now
+          </HxButton>
+        </div>
+      </div>
+      {error && (
+        <div
+          className="mt-2 rounded-md border px-3 py-2 text-[12px]"
+          style={{
+            background: "color-mix(in oklch, var(--hx-err) 10%, transparent)",
+            borderColor: "color-mix(in oklch, var(--hx-err) 30%, transparent)",
+            color: "var(--hx-err)",
+          }}
         >
-          Start
-        </HxButton>
-        <HxButton
-          size="sm"
-          variant="secondary"
-          icon="stop"
-          disabled={!hostOnline || server.status !== "running"}
-          onClick={() => onAct("stop")}
-        >
-          Stop
-        </HxButton>
-        <HxButton
-          size="sm"
-          variant="secondary"
-          icon="restart"
-          disabled={!hostOnline || server.status === "installing"}
-          onClick={() => onAct("restart")}
-        >
-          Restart
-        </HxButton>
-        <HxButton
-          size="sm"
-          variant="danger"
-          icon="trash"
-          onClick={onDelete}
-        >
-          Delete
-        </HxButton>
+          {error}
+        </div>
+      )}
+      <div className="mt-3">
+        {loading ? (
+          <div className="text-[12px] text-[var(--hx-muted-fg)]">Loading…</div>
+        ) : backups.length === 0 ? (
+          <div className="text-[12px] text-[var(--hx-muted-fg)]">
+            No backups yet. Click <span className="font-medium">Back up now</span>{" "}
+            to create one, or enable the schedule above.
+          </div>
+        ) : (
+          <div className="flex flex-col">
+            {backups.map((b) => {
+              const ago = Math.floor(
+                (Date.now() - new Date(b.startedAt).getTime()) / 1000,
+              );
+              const tone: "ok" | "warn" | "err" | "accent" | "neutral" =
+                b.status === "success"
+                  ? "ok"
+                  : b.status === "running" || b.status === "pending"
+                    ? "accent"
+                    : "err";
+              return (
+                <div
+                  key={b.id}
+                  className="grid items-center gap-3 border-t py-[8px] text-[12.5px]"
+                  style={{
+                    gridTemplateColumns: "90px 90px 1fr auto",
+                    borderColor: "var(--hx-border)",
+                  }}
+                >
+                  <HxBadge size="sm" tone={tone}>
+                    {b.status}
+                  </HxBadge>
+                  <span className="hx-mono-tag text-[var(--hx-muted-fg)]">
+                    {b.trigger}
+                  </span>
+                  <span className="truncate font-mono text-[11.5px]">
+                    {b.status === "success"
+                      ? formatBytes(b.sizeBytes ?? 0)
+                      : b.error
+                        ? b.error
+                        : "—"}
+                    <span className="ml-2 text-[var(--hx-muted-fg)]">
+                      {relativeTime(ago)}
+                    </span>
+                  </span>
+                  <span className="flex gap-1.5">
+                    <HxButton
+                      size="sm"
+                      variant="secondary"
+                      icon="restart"
+                      disabled={b.status !== "success" || !hostOnline || busy}
+                      onClick={() => restore(b)}
+                    >
+                      Restore
+                    </HxButton>
+                    <HxButton
+                      size="sm"
+                      variant="ghost"
+                      icon="trash"
+                      disabled={busy}
+                      onClick={() => del(b)}
+                    >
+                      Delete
+                    </HxButton>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

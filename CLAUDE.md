@@ -28,9 +28,9 @@ PROJECT.md §11 lists 19 MVP steps. Status:
 | 10 | Minecraft deployment | ❌ Not done. Catalog has Valheim/CS:GO/Rust (mostly UDP, wrong for MVP) |
 | 11 | Lifecycle controls | ✅ |
 | 12 | Logs | ✅ |
-| 13 | Remote terminal | ⚠️ Works, but not opt-in per host and not audited (§3.6, §6.1) |
+| 13 | Remote terminal | ✅ — opt-in per host, every command + terminal session lands in `audit_events` and the Settings tab Audit log (§3.6, §6.1) |
 | 14 | Notifications | ❌ |
-| 15 | Backups | ❌ |
+| 15 | Backups | ✅ — on-host tar.gz + schedule + retention + restore. **R2/S3 destination deferred** (see "Known stack divergences" below). |
 | 16 | Agent self-update | ❌ |
 | 17 | Terraria | ❌ |
 | 18 | Security hardening (cgroups, AppArmor, per-server user) | 🟡 Partial — sysctl, fail2ban, unattended-upgrades, narrow sudoers for `ufw` done. No cgroups v2, no AppArmor, no per-server Linux user. |
@@ -52,6 +52,7 @@ migration target documented and will be revisited as a dedicated phase.
 | Agent language | Go (§0.3) | Node.js/TypeScript, esbuild bundle | Faster to prototype, shared types with server, no native-module pain. Go rewrite is Phase 10. |
 | Game tunnel | Cloudflare Tunnel per server (§2.4) | In-container TCP relay over the existing WS (ADR 0001 Option A) | PROJECT.md §2.4's CF Tunnel assumption doesn't survive first contact — CF's free tier only proxies HTTP/S. See /docs/decisions/0001. |
 | Deploy target | Minecraft Java first (§3.5) | Valheim / CS:GO / Rust / Project Zomboid | Most of the current catalog is UDP — won't work with Cloudflare Tunnel. Must prune and add Minecraft Java. |
+| Backup destination | S3-compatible / Cloudflare R2 (§3.10) | Local on the host's own disk under `<SERVERS_DIR>/<id>/.gameserveros-backups/` | Avoids an external dep during MVP. Schema reserves a `destination` column (`local` today, `r2`/`s3` later) so adding R2 is data-only. The `backups` table also already carries `path`, `size_bytes`, `started_at`, `completed_at` — those don't change shape when we add a remote destination. |
 
 See `/docs/decisions/` (to be created as we resolve migrations).
 

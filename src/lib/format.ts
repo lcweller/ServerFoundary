@@ -6,6 +6,14 @@ export function relativeTime(sec: number): string {
   return `${Math.floor(sec / 86400)}d ago`;
 }
 
+export function formatBytes(b: number | null | undefined): string {
+  if (b == null || !isFinite(b) || b < 0) return "—";
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KiB`;
+  if (b < 1024 * 1024 * 1024) return `${(b / 1024 / 1024).toFixed(1)} MiB`;
+  return `${(b / 1024 / 1024 / 1024).toFixed(2)} GiB`;
+}
+
 export function uptimeLabel(sec: number): string {
   if (!sec || sec < 0) return "—";
   const d = Math.floor(sec / 86400);
