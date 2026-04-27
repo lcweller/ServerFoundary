@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { HxIcon } from "../icons";
 import { HxKbd } from "../kbd";
+import { HxNotificationsBell } from "../notifications-bell";
 
 type Crumb = { label: string; href?: string };
 
@@ -85,6 +86,8 @@ export function HxTopBar({
         <span className="flex-1 text-left">Search or command…</span>
         <HxKbd>⌘K</HxKbd>
       </button>
+
+      <HxNotificationsBell />
 
       <Link
         href="/dashboard/hosts/new"

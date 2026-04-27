@@ -7,6 +7,8 @@ import {
   setSessionCookie,
   verifyPassword,
 } from "@/lib/auth";
+import { notify } from "@/lib/notifications";
+import { sourceIpFromRequest } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
   let body;
@@ -41,6 +43,17 @@ export async function POST(req: NextRequest) {
 
   const ok = await verifyPassword(password, user.passwordHash);
   if (!ok) {
+    // Quietly notify the real account owner that someone got their
+    // email right but the password wrong (PROJECT.md §3.11). We never
+    // signal back to the caller whether the email matched, so a
+    // probing attacker still gets a generic 401.
+    notify({
+      userId: user.id,
+      kind: "auth_failure",
+      severity: "warn",
+      title: "Failed sign-in attempt",
+      body: `From ${sourceIpFromRequest(req) ?? "unknown IP"}`,
+    });
     return NextResponse.json(
       { error: "Invalid email or password." },
       { status: 401 },

@@ -29,7 +29,7 @@ PROJECT.md §11 lists 19 MVP steps. Status:
 | 11 | Lifecycle controls | ✅ |
 | 12 | Logs | ✅ |
 | 13 | Remote terminal | ✅ — opt-in per host, every command + terminal session lands in `audit_events` and the Settings tab Audit log (§3.6, §6.1) |
-| 14 | Notifications | ❌ |
+| 14 | Notifications | ✅ — in-app bell + dropdown + history page. Triggers wired: host online/offline, host paired, server crashed, backup completed/failed, login failed. **Email via Resend deferred** (see Known stack divergences). |
 | 15 | Backups | ✅ — on-host tar.gz + schedule + retention + restore. **R2/S3 destination deferred** (see "Known stack divergences" below). |
 | 16 | Agent self-update | ❌ |
 | 17 | Terraria | ❌ |
@@ -53,6 +53,7 @@ migration target documented and will be revisited as a dedicated phase.
 | Game tunnel | Cloudflare Tunnel per server (§2.4) | In-container TCP relay over the existing WS (ADR 0001 Option A) | PROJECT.md §2.4's CF Tunnel assumption doesn't survive first contact — CF's free tier only proxies HTTP/S. See /docs/decisions/0001. |
 | Deploy target | Minecraft Java first (§3.5) | Valheim / CS:GO / Rust / Project Zomboid | Most of the current catalog is UDP — won't work with Cloudflare Tunnel. Must prune and add Minecraft Java. |
 | Backup destination | S3-compatible / Cloudflare R2 (§3.10) | Local on the host's own disk under `<SERVERS_DIR>/<id>/.gameserveros-backups/` | Avoids an external dep during MVP. Schema reserves a `destination` column (`local` today, `r2`/`s3` later) so adding R2 is data-only. The `backups` table also already carries `path`, `size_bytes`, `started_at`, `completed_at` — those don't change shape when we add a remote destination. |
+| Notification email | Resend (§3.11) | In-app bell only | Avoids an external dep + signup before the user actually has subscribers. The `notifications` table is the source of truth; an email worker layered on later just SELECTs from it. Per-user prefs are deferred (single global "in-app on" today). |
 
 See `/docs/decisions/` (to be created as we resolve migrations).
 

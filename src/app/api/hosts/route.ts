@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { hosts, enrollmentTokens } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { recordAudit, sourceIpFromRequest } from "@/lib/audit";
+import { notify } from "@/lib/notifications";
 
 const ENROLLMENT_TTL_MS = 60 * 60 * 1000;
 
@@ -58,6 +59,15 @@ export async function POST(req: NextRequest) {
     kind: "host_create",
     target: host.name,
     sourceIp: sourceIpFromRequest(req),
+  });
+
+  notify({
+    userId: user.id,
+    kind: "host_paired",
+    severity: "info",
+    title: `${host.name} added`,
+    body: "Run the install command on the host to bring the agent online.",
+    hostId: host.id,
   });
 
   return NextResponse.json({ host, enrollmentToken: token });

@@ -327,3 +327,41 @@ export const backupConfigs = pgTable("backup_configs", {
 
 export type Backup = typeof backups.$inferSelect;
 export type BackupConfig = typeof backupConfigs.$inferSelect;
+
+/**
+ * In-app notifications (PROJECT.md §3.11).
+ *
+ * Severity is `info | warn | err` to match the rest of the dashboard's
+ * tone vocabulary (HxBadge tone). `kind` is the trigger that produced
+ * the notification — extend freely; the UI maps unknown kinds to a
+ * neutral icon. `hostId` / `gameServerId` are optional pointers so the
+ * dropdown can deep-link to the relevant page.
+ *
+ * `dismissedAt` is separate from `readAt` so the user can clear an item
+ * from their bell while still keeping it visible on the full history
+ * page. Read-all simply sets `readAt = now()` for every unread row.
+ *
+ * Email delivery is deferred — see CLAUDE.md "Known stack divergences".
+ */
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  severity: text("severity").notNull().default("info"),
+  title: text("title").notNull(),
+  body: text("body"),
+  hostId: uuid("host_id").references(() => hosts.id, { onDelete: "cascade" }),
+  gameServerId: uuid("game_server_id").references(() => gameServers.id, {
+    onDelete: "cascade",
+  }),
+  details: jsonb("details"),
+  readAt: timestamp("read_at", { withTimezone: true }),
+  dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type Notification = typeof notifications.$inferSelect;

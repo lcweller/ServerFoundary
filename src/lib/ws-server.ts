@@ -31,6 +31,7 @@ import {
   pruneSuccessfulBackups,
   startBackupScheduler,
 } from "@/lib/backups";
+import { notify } from "@/lib/notifications";
 
 type AgentMessage =
   | {
@@ -257,10 +258,28 @@ async function handleAgentConnection(ws: WebSocket) {
     return true;
   });
 
+  // Was the host previously offline? Only notify on a real flip so a
+  // reconnect after a brief WS hiccup doesn't spam the bell.
+  const [prev] = await db
+    .select({ status: hosts.status, name: hosts.name, userId: hosts.userId })
+    .from(hosts)
+    .where(eq(hosts.id, hostId))
+    .limit(1);
   await db
     .update(hosts)
     .set({ status: "online", lastHeartbeatAt: new Date() })
     .where(eq(hosts.id, hostId));
+
+  if (prev && prev.status !== "online") {
+    notify({
+      userId: prev.userId,
+      kind: "host_online",
+      severity: "info",
+      title: `${prev.name} is online`,
+      body: "The agent reconnected to the dashboard.",
+      hostId,
+    });
+  }
 
   console.log(`[agent] connected host=${hostId}`);
 
@@ -291,10 +310,25 @@ async function handleAgentConnection(ws: WebSocket) {
 
   ws.on("close", async () => {
     unregisterAgent(hostId);
+    const [prev] = await db
+      .select({ status: hosts.status, name: hosts.name, userId: hosts.userId })
+      .from(hosts)
+      .where(eq(hosts.id, hostId))
+      .limit(1);
     await db
       .update(hosts)
       .set({ status: "offline" })
       .where(eq(hosts.id, hostId));
+    if (prev && prev.status === "online") {
+      notify({
+        userId: prev.userId,
+        kind: "host_offline",
+        severity: "warn",
+        title: `${prev.name} went offline`,
+        body: "The agent disconnected from the dashboard.",
+        hostId,
+      });
+    }
     console.log(`[agent] disconnected host=${hostId}`);
   });
 
@@ -340,6 +374,16 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
       break;
     }
     case "game_server_status": {
+      const [prev] = await db
+        .select({
+          status: gameServers.status,
+          name: gameServers.name,
+          userId: gameServers.userId,
+          hostId: gameServers.hostId,
+        })
+        .from(gameServers)
+        .where(eq(gameServers.id, msg.gameServerId))
+        .limit(1);
       await db
         .update(gameServers)
         .set({
@@ -349,6 +393,20 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
           updatedAt: new Date(),
         })
         .where(eq(gameServers.id, msg.gameServerId));
+      // Notify on a transition into "crashed" so the user finds out
+      // even if they aren't on the host page. `started` is intentionally
+      // not notified — it would fire on every restart and clog the bell.
+      if (prev && prev.status !== "crashed" && msg.status === "crashed") {
+        notify({
+          userId: prev.userId,
+          kind: "game_server_crashed",
+          severity: "err",
+          title: `${prev.name} crashed`,
+          body: "The agent will retry up to 3 times before giving up.",
+          hostId: prev.hostId,
+          gameServerId: msg.gameServerId,
+        });
+      }
       break;
     }
     case "log": {
@@ -402,6 +460,44 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
           sizeBytes: msg.sizeBytes ?? null,
           error: msg.error ?? null,
         });
+        if (msg.status === "success" || msg.status === "failed") {
+          // Notify the owner. Look up name + ids from gameServers so the
+          // bell entry can deep-link to the host detail page.
+          const [gs] = await db
+            .select({
+              name: gameServers.name,
+              userId: gameServers.userId,
+              hostId: gameServers.hostId,
+            })
+            .from(gameServers)
+            .where(eq(gameServers.id, msg.gameServerId))
+            .limit(1);
+          if (gs) {
+            if (msg.status === "success") {
+              notify({
+                userId: gs.userId,
+                kind: "backup_completed",
+                severity: "info",
+                title: `${gs.name}: backup completed`,
+                body: msg.sizeBytes
+                  ? `${(msg.sizeBytes / 1_048_576).toFixed(1)} MiB`
+                  : null,
+                hostId: gs.hostId,
+                gameServerId: msg.gameServerId,
+              });
+            } else {
+              notify({
+                userId: gs.userId,
+                kind: "backup_failed",
+                severity: "err",
+                title: `${gs.name}: backup failed`,
+                body: msg.error ?? null,
+                hostId: gs.hostId,
+                gameServerId: msg.gameServerId,
+              });
+            }
+          }
+        }
         if (msg.status === "success") {
           // Apply retention asynchronously: list older successful rows
           // beyond the configured count and dispatch delete_backup for
