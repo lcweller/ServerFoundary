@@ -27,7 +27,10 @@ export type AuditKind =
   | "backup_create"
   | "backup_restore"
   | "backup_delete"
-  | "backup_config_change";
+  | "backup_config_change"
+  | "agent_update_started"
+  | "agent_update_success"
+  | "agent_update_failed";
 
 export function sourceIpFromRequest(req: NextRequest | Request): string | null {
   const h =

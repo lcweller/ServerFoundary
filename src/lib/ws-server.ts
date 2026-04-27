@@ -32,6 +32,7 @@ import {
   startBackupScheduler,
 } from "@/lib/backups";
 import { notify } from "@/lib/notifications";
+import { LATEST_AGENT_VERSION, agentBundleUrl } from "@/lib/agent-version";
 
 type AgentMessage =
   | {
@@ -111,6 +112,15 @@ type AgentMessage =
       backupId: string;
       gameServerId: string;
       status: "running" | "success" | "failed";
+      error?: string;
+    }
+  | {
+      // Agent → platform: self-update lifecycle (PROJECT.md §3.8).
+      // `success` arrives just before the agent exits; the next
+      // heartbeat from a reconnected agent will carry the new version.
+      type: "agent_update_status";
+      status: "started" | "success" | "failed";
+      version?: string;
       error?: string;
     };
 
@@ -371,6 +381,12 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
       recordHeartbeat(hostId, msg.metrics).catch((err) =>
         console.warn("[metrics] recordHeartbeat failed:", (err as Error).message),
       );
+      // Self-update gate (PROJECT.md §3.8): if the agent's running
+      // version differs from the recommended one, send `update_agent`
+      // exactly once per process per host. The agent will exit after
+      // swapping the bundle, reconnect with the new version, and not
+      // trip this branch again.
+      maybeNudgeAgentUpdate(hostId, msg.agent_version);
       break;
     }
     case "game_server_status": {
@@ -527,7 +543,85 @@ async function handleAgentMessage(hostId: string, msg: AgentMessage) {
       );
       break;
     }
+    case "agent_update_status": {
+      const [host] = await db
+        .select({ name: hosts.name, userId: hosts.userId })
+        .from(hosts)
+        .where(eq(hosts.id, hostId))
+        .limit(1);
+      if (!host) break;
+      if (msg.status === "started") {
+        recordAudit({
+          hostId,
+          userId: null,
+          kind: "agent_update_started",
+          target: host.name,
+          details: { version: msg.version ?? null },
+        });
+      } else if (msg.status === "success") {
+        // The agent will reconnect on the new version momentarily.
+        recordAudit({
+          hostId,
+          userId: null,
+          kind: "agent_update_success",
+          target: host.name,
+          details: { version: msg.version ?? null },
+        });
+        notify({
+          userId: host.userId,
+          kind: "agent_update_success",
+          severity: "info",
+          title: `${host.name}: agent updated to v${msg.version ?? "?"}`,
+          hostId,
+        });
+      } else if (msg.status === "failed") {
+        recordAudit({
+          hostId,
+          userId: null,
+          kind: "agent_update_failed",
+          target: host.name,
+          details: { version: msg.version ?? null, error: msg.error ?? null },
+        });
+        notify({
+          userId: host.userId,
+          kind: "agent_update_failed",
+          severity: "err",
+          title: `${host.name}: agent update failed`,
+          body: msg.error ?? null,
+          hostId,
+        });
+        // Allow another nudge on the next heartbeat — the failure may
+        // have been transient (network blip mid-download).
+        nudgedAgents.delete(hostId);
+      }
+      break;
+    }
   }
+}
+
+/**
+ * Per-process set of hosts we've already sent `update_agent` to in this
+ * lifetime, so we don't re-dispatch on every 10s heartbeat. Cleared on
+ * a failed update so the next heartbeat retries.
+ */
+const nudgedAgents = new Set<string>();
+
+function maybeNudgeAgentUpdate(
+  hostId: string,
+  reportedVersion: string | undefined | null,
+): void {
+  if (!reportedVersion) return;
+  if (reportedVersion === LATEST_AGENT_VERSION) return;
+  if (nudgedAgents.has(hostId)) return;
+  nudgedAgents.add(hostId);
+  console.log(
+    `[agent-update] nudging host ${hostId}: v${reportedVersion} → v${LATEST_AGENT_VERSION}`,
+  );
+  sendCommand(hostId, {
+    type: "update_agent",
+    url: agentBundleUrl(),
+    version: LATEST_AGENT_VERSION,
+  });
 }
 
 /**

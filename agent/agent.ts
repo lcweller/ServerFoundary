@@ -18,7 +18,7 @@ import * as net from "net";
 import * as path from "path";
 import WebSocket from "ws";
 
-const AGENT_VERSION = "0.1.0";
+const AGENT_VERSION = "0.2.0";
 const CONFIG_PATH = process.env.GAMESERVEROS_CONFIG ?? "/etc/gameserveros/agent.env";
 const SERVERS_DIR = process.env.GAMESERVEROS_SERVERS_DIR ?? "/opt/gameserveros/servers";
 const STEAMCMD = process.env.GAMESERVEROS_STEAMCMD ?? "steamcmd";
@@ -784,6 +784,12 @@ class AgentConnection {
             String(msg.path ?? ""),
           );
           break;
+        case "update_agent":
+          await this.selfUpdate(
+            String(msg.url ?? ""),
+            String(msg.version ?? ""),
+          );
+          break;
         default:
           log("warn", "Unknown command:", type);
       }
@@ -1203,6 +1209,90 @@ class AgentConnection {
         `Failed to delete backup ${filePath}:`,
         (err as Error).message,
       );
+    }
+  }
+
+  /**
+   * Self-update flow (PROJECT.md §3.8).
+   *
+   * 1. Resolve absolute URL against the configured dashboard URL if the
+   *    server sent us a relative one.
+   * 2. Download to a sibling tmp file in the same directory so the final
+   *    rename is atomic on Linux.
+   * 3. Sanity-check the bundle (non-empty, looks like JS).
+   * 4. Keep the previous bundle as `.prev` so a manual rollback is one
+   *    `mv` away.
+   * 5. Report success then exit non-zero so the existing systemd unit's
+   *    `Restart=on-failure` brings us back up on the new bundle.
+   */
+  private async selfUpdate(url: string, version: string) {
+    if (!url) return;
+    // process.argv[1] is the path systemd invoked us with — i.e., our
+    // own bundle. Refuse to overwrite anything else.
+    const target = process.argv[1];
+    if (!target || !target.endsWith("agent.cjs")) {
+      log("error", "Refusing self-update: argv[1] is not agent.cjs:", target);
+      this.send({
+        type: "agent_update_status",
+        status: "failed",
+        version,
+        error: "argv[1] is not agent.cjs",
+      });
+      return;
+    }
+    const absUrl = url.startsWith("http")
+      ? url
+      : `${this.config.dashboardUrl.replace(/\/$/, "")}${
+          url.startsWith("/") ? url : `/${url}`
+        }`;
+    log("info", `Self-update: fetching ${absUrl} (target ${version})`);
+    this.send({
+      type: "agent_update_status",
+      status: "started",
+      version,
+    });
+    try {
+      const res = await fetch(absUrl);
+      if (!res.ok) {
+        throw new Error(`download returned HTTP ${res.status}`);
+      }
+      const buf = Buffer.from(await res.arrayBuffer());
+      if (buf.length < 1024) {
+        throw new Error(`bundle suspiciously small (${buf.length} bytes)`);
+      }
+      const head = buf.slice(0, 256).toString("utf8");
+      if (!/(?:require|module\.exports|"use strict"|var |const |function )/.test(head)) {
+        throw new Error("bundle does not look like a JS file");
+      }
+      const dir = path.dirname(target);
+      const tmp = path.join(dir, `.agent.cjs.new.${process.pid}`);
+      const prev = path.join(dir, "agent.cjs.prev");
+      const fsSync = require("fs") as typeof import("fs");
+      fsSync.writeFileSync(tmp, buf, { mode: 0o755 });
+      // Best-effort copy of current bundle to .prev for manual rollback.
+      try {
+        fsSync.copyFileSync(target, prev);
+      } catch (err) {
+        log("warn", `Could not snapshot previous agent:`, (err as Error).message);
+      }
+      // Atomic rename on Linux when src/dst are on the same filesystem.
+      fsSync.renameSync(tmp, target);
+      log("info", `Self-update: swapped to v${version}; restarting`);
+      this.send({
+        type: "agent_update_status",
+        status: "success",
+        version,
+      });
+      // Give the WS frame a moment to flush before we tear down.
+      setTimeout(() => process.exit(75 /* EX_TEMPFAIL → systemd restarts */), 500);
+    } catch (err) {
+      log("error", "Self-update failed:", (err as Error).message);
+      this.send({
+        type: "agent_update_status",
+        status: "failed",
+        version,
+        error: (err as Error).message,
+      });
     }
   }
 

@@ -196,6 +196,13 @@ const KIND_LABELS: Record<string, string> = {
   game_server_delete: "delete",
   terminal_open: "terminal opened",
   terminal_close: "terminal closed",
+  backup_create: "backup",
+  backup_restore: "restore",
+  backup_delete: "backup deleted",
+  backup_config_change: "backup config",
+  agent_update_started: "agent update started",
+  agent_update_success: "agent updated",
+  agent_update_failed: "agent update failed",
 };
 
 const KIND_COLORS: Record<string, string> = {
@@ -208,6 +215,12 @@ const KIND_COLORS: Record<string, string> = {
   game_server_start: "var(--hx-accent)",
   game_server_stop: "var(--hx-warn)",
   game_server_restart: "var(--hx-accent-2)",
+  backup_create: "var(--hx-accent)",
+  backup_restore: "var(--hx-accent-2)",
+  backup_delete: "var(--hx-warn)",
+  agent_update_started: "var(--hx-accent-2)",
+  agent_update_success: "var(--hx-accent)",
+  agent_update_failed: "var(--hx-err)",
 };
 
 function AuditLog({ hostId }: { hostId: string }) {

@@ -210,7 +210,10 @@ Environment=GAMESERVEROS_CONFIG=${CONFIG_FILE}
 Environment=GAMESERVEROS_SERVERS_DIR=${SERVERS_DIR}
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games
 ExecStart=$(command -v node) ${AGENT_BIN}
-Restart=on-failure
+# Restart=always so the agent's self-update flow (exit after swapping
+# the bundle) reliably brings up the new version, in addition to
+# auto-recovering from crashes.
+Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal

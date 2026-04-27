@@ -31,7 +31,7 @@ PROJECT.md §11 lists 19 MVP steps. Status:
 | 13 | Remote terminal | ✅ — opt-in per host, every command + terminal session lands in `audit_events` and the Settings tab Audit log (§3.6, §6.1) |
 | 14 | Notifications | ✅ — in-app bell + dropdown + history page. Triggers wired: host online/offline, host paired, server crashed, backup completed/failed, login failed. **Email via Resend deferred** (see Known stack divergences). |
 | 15 | Backups | ✅ — on-host tar.gz + schedule + retention + restore. **R2/S3 destination deferred** (see "Known stack divergences" below). |
-| 16 | Agent self-update | ❌ |
+| 16 | Agent self-update | ✅ — heartbeat-driven nudge: agent reports version, ws-server dispatches `update_agent` if it differs from `LATEST_AGENT_VERSION`, agent atomically swaps `agent.cjs` and exits so systemd brings up the new bundle. Audit + notify the user. **Code-signed bundles + KMS keys deferred** (see Known stack divergences). |
 | 17 | Terraria | ❌ |
 | 18 | Security hardening (cgroups, AppArmor, per-server user) | 🟡 Partial — sysctl, fail2ban, unattended-upgrades, narrow sudoers for `ufw` done. No cgroups v2, no AppArmor, no per-server Linux user. |
 | 19 | GameServerOS ISO | ❌ |
@@ -54,6 +54,7 @@ migration target documented and will be revisited as a dedicated phase.
 | Deploy target | Minecraft Java first (§3.5) | Valheim / CS:GO / Rust / Project Zomboid | Most of the current catalog is UDP — won't work with Cloudflare Tunnel. Must prune and add Minecraft Java. |
 | Backup destination | S3-compatible / Cloudflare R2 (§3.10) | Local on the host's own disk under `<SERVERS_DIR>/<id>/.gameserveros-backups/` | Avoids an external dep during MVP. Schema reserves a `destination` column (`local` today, `r2`/`s3` later) so adding R2 is data-only. The `backups` table also already carries `path`, `size_bytes`, `started_at`, `completed_at` — those don't change shape when we add a remote destination. |
 | Notification email | Resend (§3.11) | In-app bell only | Avoids an external dep + signup before the user actually has subscribers. The `notifications` table is the source of truth; an email worker layered on later just SELECTs from it. Per-user prefs are deferred (single global "in-app on" today). |
+| Agent bundle signing | KMS-signed binaries with rollback gate (§3.8) | Plain HTTPS download + sanity-check (length + JS-shaped head) | The download already rides over an authenticated HTTPS dashboard the user trusts; signing key infrastructure (KMS, signing in CI, verifying in agent) is a meaningful piece of work that doesn't pay off until we ship binaries to hosts we don't control. Migration path: switch `agentBundleUrl()` to a signed URL with embedded SHA + signature header, verify in the agent's `selfUpdate` before swap. |
 
 See `/docs/decisions/` (to be created as we resolve migrations).
 
