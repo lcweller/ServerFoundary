@@ -33,7 +33,7 @@ PROJECT.md §11 lists 19 MVP steps. Status:
 | 15 | Backups | ✅ — on-host tar.gz + schedule + retention + restore. **R2/S3 destination deferred** (see "Known stack divergences" below). |
 | 16 | Agent self-update | ✅ — heartbeat-driven nudge: agent reports version, ws-server dispatches `update_agent` if it differs from `LATEST_AGENT_VERSION`, agent atomically swaps `agent.cjs` and exits so systemd brings up the new bundle. Audit + notify the user. **Code-signed bundles + KMS keys deferred** (see Known stack divergences). |
 | 17 | Terraria | ❌ |
-| 18 | Security hardening (cgroups, AppArmor, per-server user) | 🟡 Partial — sysctl, fail2ban, unattended-upgrades, narrow sudoers for `ufw` done. No cgroups v2, no AppArmor, no per-server Linux user. |
+| 18 | Security hardening (cgroups, AppArmor, per-server user) | 🟡 Partial — sysctl, fail2ban, unattended-upgrades, narrow sudoers for `ufw`, per-server `prlimit --as=` + `nice` caps with UI, dashboard security headers (X-Frame-Options/HSTS/Referrer-Policy/X-Content-Type-Options), per-IP login + signup rate limit. **Still missing**: cgroups v2 quotas, AppArmor profiles, per-server Linux user. |
 | 19 | GameServerOS ISO | ❌ |
 
 **The critical path test from §11**: sign up → install → deploy Minecraft → friend on a different network connects via platform hostname → metrics + logs → stop. Currently blocked at step 9 (tunnel) and step 10 (Minecraft).

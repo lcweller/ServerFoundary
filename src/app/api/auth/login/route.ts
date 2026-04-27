@@ -9,8 +9,21 @@ import {
 } from "@/lib/auth";
 import { notify } from "@/lib/notifications";
 import { sourceIpFromRequest } from "@/lib/audit";
+import { rateLimit, sweepExpiredBuckets } from "@/lib/rate-limit";
 
 export async function POST(req: NextRequest) {
+  // PROJECT.md §3.9 — 10 attempts/minute/IP. Generous enough for the
+  // typo-then-paste flow but a script firing every 100ms gets stopped.
+  sweepExpiredBuckets();
+  const ip = sourceIpFromRequest(req) ?? "unknown";
+  const rl = rateLimit(`login:${ip}`, { max: 10, windowMs: 60_000 });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many attempts. Try again in a minute." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+    );
+  }
+
   let body;
   try {
     body = await req.json();

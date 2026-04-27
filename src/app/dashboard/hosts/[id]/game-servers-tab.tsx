@@ -168,7 +168,8 @@ function ServerRow({
             </HxBadge>
           </div>
           <div className="mt-0.5 truncate font-mono text-[11.5px] text-[var(--hx-muted-fg)]">
-            {gameName} · port {server.port}
+            {gameName} · port {server.port} · {server.memMaxMb} MiB ·{" "}
+            {server.cpuPct}% CPU
           </div>
           <PublicAddress tunnel={server.tunnel} />
         </div>
@@ -510,6 +511,10 @@ function DeployDialog({
   const [gameId, setGameId] = useState(games[0]?.id ?? "");
   const [name, setName] = useState("");
   const [port, setPort] = useState<string>(String(games[0]?.defaultPort ?? 27015));
+  // PROJECT.md §3.9 — per-server resource caps. Defaults match the
+  // server-side clamp's defaults so the API doesn't override them.
+  const [memMaxMb, setMemMaxMb] = useState<string>("4096");
+  const [cpuPct, setCpuPct] = useState<string>("200");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -527,7 +532,13 @@ function DeployDialog({
     const res = await fetch(`/api/hosts/${hostId}/game-servers`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ gameId, name, port: Number(port) }),
+      body: JSON.stringify({
+        gameId,
+        name,
+        port: Number(port),
+        memMaxMb: Number(memMaxMb),
+        cpuPct: Number(cpuPct),
+      }),
     });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
@@ -614,6 +625,50 @@ function DeployDialog({
               }}
             />
           </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="hx-mono-tag text-[var(--hx-muted-fg)]">
+                Memory cap (MiB)
+              </span>
+              <input
+                type="number"
+                min={256}
+                max={65536}
+                step={256}
+                value={memMaxMb}
+                onChange={(e) => setMemMaxMb(e.target.value)}
+                className="h-9 rounded-lg border px-3 font-mono text-[13.5px]"
+                style={{
+                  background: "var(--hx-bg)",
+                  borderColor: "var(--hx-border)",
+                  color: "var(--hx-fg)",
+                }}
+              />
+            </label>
+            <label className="flex flex-col gap-1.5">
+              <span className="hx-mono-tag text-[var(--hx-muted-fg)]">
+                CPU %
+              </span>
+              <input
+                type="number"
+                min={25}
+                max={1600}
+                step={25}
+                value={cpuPct}
+                onChange={(e) => setCpuPct(e.target.value)}
+                className="h-9 rounded-lg border px-3 font-mono text-[13.5px]"
+                style={{
+                  background: "var(--hx-bg)",
+                  borderColor: "var(--hx-border)",
+                  color: "var(--hx-fg)",
+                }}
+              />
+            </label>
+          </div>
+          <p className="text-[11.5px] text-[var(--hx-muted-fg)]">
+            Best-effort caps applied via prlimit + nice. 100% = one full
+            core. Real cgroup quotas land in a follow-up phase.
+          </p>
           {error && (
             <div
               className="rounded-lg border px-3 py-2 text-[12.5px]"

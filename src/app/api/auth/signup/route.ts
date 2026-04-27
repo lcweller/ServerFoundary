@@ -12,8 +12,22 @@ import {
   validateName,
   validatePassword,
 } from "@/lib/validation";
+import { rateLimit, sweepExpiredBuckets } from "@/lib/rate-limit";
+import { sourceIpFromRequest } from "@/lib/audit";
 
 export async function POST(req: NextRequest) {
+  // PROJECT.md §3.9 — 5 signups/hour/IP keeps automated abuse from
+  // filling the user table; legitimate users only sign up once.
+  sweepExpiredBuckets();
+  const ip = sourceIpFromRequest(req) ?? "unknown";
+  const rl = rateLimit(`signup:${ip}`, { max: 5, windowMs: 60 * 60_000 });
+  if (!rl.ok) {
+    return NextResponse.json(
+      { error: "Too many signups from this network. Try again later." },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+    );
+  }
+
   let body;
   try {
     body = await req.json();

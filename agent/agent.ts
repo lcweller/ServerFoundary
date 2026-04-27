@@ -266,6 +266,8 @@ interface RunningServer {
   restartAttempts: number;
   steamAppId: number | null;
   dir: string;
+  /** PROJECT.md §3.9 best-effort caps. */
+  limits: { memMaxMb: number; cpuPct: number };
 }
 
 const servers = new Map<string, RunningServer>();
@@ -285,6 +287,8 @@ interface ServerManifest {
   steamAppId: number | null;
   port: number;
   startupCommand: string;
+  /** PROJECT.md §3.9 best-effort caps. Optional so older manifests load. */
+  limits?: { memMaxMb: number; cpuPct: number };
 }
 
 function writeManifest(dir: string, m: ServerManifest): void {
@@ -335,6 +339,7 @@ function hydrateServersFromManifests(): void {
       status: "stopped",
       restartAttempts: 0,
       dir: path.join(SERVERS_DIR, m.id),
+      limits: m.limits ?? { memMaxMb: 4096, cpuPct: 200 },
     });
   }
 }
@@ -546,6 +551,41 @@ async function writeBootstrapFiles(
   }
 }
 
+/**
+ * Build the actual command we hand to /bin/sh, applying PROJECT.md §3.9
+ * best-effort resource caps:
+ *
+ *   prlimit --as=<bytes> --nofile=4096   ← address-space + fd ceiling
+ *   nice -n <prio>                        ← CPU priority shift
+ *
+ * Both ship in util-linux on every modern Linux. cpu-percent is mapped
+ * to a coarse nice value: 100% → 0, 50% → 5, 25% → 10, ≥200% → -5.
+ * Real cgroups v2 quota is a Phase 9.5 follow-on — see CLAUDE.md.
+ */
+function wrapWithLimits(cmd: string, limits: { memMaxMb: number; cpuPct: number }): string {
+  const memBytes = Math.max(64, Math.floor(limits.memMaxMb)) * 1024 * 1024;
+  const niceLevel =
+    limits.cpuPct >= 200 ? -5 :
+    limits.cpuPct >= 100 ? 0 :
+    limits.cpuPct >= 50 ? 5 :
+    10;
+  // We can't assume prlimit / nice are on PATH on every weird host; fall
+  // through to the raw command if either is missing.
+  return [
+    `if command -v prlimit >/dev/null 2>&1 && command -v nice >/dev/null 2>&1; then`,
+    `  exec prlimit --as=${memBytes} --nofile=4096 nice -n ${niceLevel} /bin/sh -c ${shellQuote(cmd)};`,
+    `else`,
+    `  exec /bin/sh -c ${shellQuote(cmd)};`,
+    `fi`,
+  ].join(" ");
+}
+
+function shellQuote(s: string): string {
+  // Single-quote with the standard '\'' escape so the inner template
+  // can contain anything safely.
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
 function startProcess(
   server: RunningServer,
   onOutput: (line: string) => void,
@@ -553,8 +593,9 @@ function startProcess(
   const cmdTemplate = server.startupCommand
     .replace(/\{PORT\}/g, String(server.port))
     .replace(/\{SERVER_NAME\}/g, server.name);
+  const wrapped = wrapWithLimits(cmdTemplate, server.limits);
   // Execute via /bin/sh so we get shell substitutions for the command template.
-  const proc = spawn("/bin/sh", ["-c", cmdTemplate], {
+  const proc = spawn("/bin/sh", ["-c", wrapped], {
     cwd: server.dir,
     stdio: ["ignore", "pipe", "pipe"],
     env: { ...process.env, HOME: server.dir, LD_LIBRARY_PATH: server.dir },
@@ -817,6 +858,8 @@ class AgentConnection {
       | null;
     /** Files written before first start, path relative to server dir. */
     bootstrapFiles?: Record<string, string>;
+    /** PROJECT.md §3.9 best-effort caps; optional for legacy servers. */
+    limits?: { memMaxMb: number; cpuPct: number };
     /** Legacy field — older server payloads. */
     steamAppId?: number | null;
   }) {
@@ -828,6 +871,7 @@ class AgentConnection {
         ? { kind: "steamcmd" as const, app_id: spec.steamAppId }
         : null);
 
+    const limits = spec.limits ?? { memMaxMb: 4096, cpuPct: 200 };
     const entry: RunningServer = {
       id: spec.id,
       name: spec.name,
@@ -839,6 +883,7 @@ class AgentConnection {
       restartAttempts: 0,
       steamAppId: install?.kind === "steamcmd" ? install.app_id : null,
       dir,
+      limits,
     };
     servers.set(spec.id, entry);
     writeManifest(dir, {
@@ -848,6 +893,7 @@ class AgentConnection {
       steamAppId: install?.kind === "steamcmd" ? install.app_id : null,
       port: spec.port,
       startupCommand: spec.startupCommand,
+      limits,
     });
     this.reportStatus(entry);
     this.sendLog(spec.id, "info", "system", `Installing to ${dir}`);

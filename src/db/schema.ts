@@ -76,6 +76,13 @@ export const gameServers = pgTable("game_servers", {
   port: integer("port").notNull(),
   playersOnline: integer("players_online").notNull().default(0),
   maxPlayers: integer("max_players").notNull().default(0),
+  // PROJECT.md §3.9 — best-effort resource limits applied at process
+  // start. The agent wraps the startup command with `prlimit --as=` for
+  // memory and `nice -n` for CPU priority (cgroups v2 + AppArmor land
+  // in a follow-up phase). Defaults are conservative — Minecraft Java
+  // is comfortable inside 4 GiB.
+  memMaxMb: integer("mem_max_mb").notNull().default(4096),
+  cpuPct: integer("cpu_pct").notNull().default(200),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

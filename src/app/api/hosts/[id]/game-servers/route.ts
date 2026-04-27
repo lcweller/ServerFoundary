@@ -8,6 +8,11 @@ import { resolveEgg, type EggJson, type EggInstall } from "@/lib/eggs";
 import { allocateTunnel } from "@/lib/tunnels";
 import { recordAudit, sourceIpFromRequest } from "@/lib/audit";
 
+function clampInt(n: number, lo: number, hi: number, fallback: number): number {
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, Math.floor(n)));
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -93,6 +98,21 @@ export async function POST(
       ? portRaw
       : game.defaultPort;
 
+  // PROJECT.md §3.9 — apply per-server resource caps. Clamp the values
+  // the user can request so a typo can't request 1 EiB of memory.
+  const memMaxMb = clampInt(
+    Number(body.memMaxMb),
+    256,
+    65536,
+    /* default */ 4096,
+  );
+  const cpuPct = clampInt(
+    Number(body.cpuPct),
+    25,
+    /* up to all cores */ 1600,
+    /* default ~ 2 cores */ 200,
+  );
+
   const [server] = await db
     .insert(gameServers)
     .values({
@@ -103,6 +123,8 @@ export async function POST(
       status: "queued",
       port,
       maxPlayers: game.defaultMaxPlayers,
+      memMaxMb,
+      cpuPct,
     })
     .returning();
 
@@ -167,6 +189,9 @@ export async function POST(
       // New structured install step. Legacy agents ignore unknown fields.
       install,
       bootstrapFiles,
+      // PROJECT.md §3.9 best-effort resource caps the agent applies via
+      // prlimit + nice. Older agents ignore these silently.
+      limits: { memMaxMb, cpuPct },
       // Kept for backward-compat with older agent.cjs bundles still in the
       // wild that read steamAppId directly; safe to remove once everyone
       // has pulled a post-Phase-2 build.
