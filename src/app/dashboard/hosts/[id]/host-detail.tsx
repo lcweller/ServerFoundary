@@ -183,9 +183,21 @@ export function HostDetail({
 
       {tab === "overview" && <OverviewTab host={host} />}
       {tab === "servers" && <GameServersTab host={host} games={games} />}
-      {tab === "terminal" && <TerminalTab host={host} wsUrl={wsUrl} />}
+      {tab === "terminal" && (
+        <TerminalTab
+          host={host}
+          wsUrl={wsUrl}
+          onOpenSettings={() => setTab("settings")}
+        />
+      )}
       {tab === "logs" && <LogsTab host={host} />}
-      {tab === "settings" && <SettingsTab host={host} onDelete={deleteHost} />}
+      {tab === "settings" && (
+        <SettingsTab
+          host={host}
+          onDelete={deleteHost}
+          onChange={(patch) => setHost((h) => ({ ...h, ...patch }))}
+        />
+      )}
     </PageContainer>
   );
 }

@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { hosts, enrollmentTokens } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
+import { recordAudit, sourceIpFromRequest } from "@/lib/audit";
 
 const ENROLLMENT_TTL_MS = 60 * 60 * 1000;
 
@@ -49,6 +50,14 @@ export async function POST(req: NextRequest) {
     hostId: host.id,
     token,
     expiresAt: new Date(Date.now() + ENROLLMENT_TTL_MS),
+  });
+
+  await recordAudit({
+    hostId: host.id,
+    userId: user.id,
+    kind: "host_create",
+    target: host.name,
+    sourceIp: sourceIpFromRequest(req),
   });
 
   return NextResponse.json({ host, enrollmentToken: token });

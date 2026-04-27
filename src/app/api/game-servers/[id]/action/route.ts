@@ -5,6 +5,7 @@ import { gameServers, gameServerLogs } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { dispatchCommand } from "@/lib/agent-hub";
 import { isHostOnline } from "@/lib/hosts";
+import { recordAudit, sourceIpFromRequest, type AuditKind } from "@/lib/audit";
 
 const ALLOWED = new Set(["start", "stop", "restart"]);
 
@@ -52,6 +53,15 @@ export async function POST(
     source: "system",
     level: "info",
     message: `User requested ${action}.`,
+  });
+
+  await recordAudit({
+    hostId: server.hostId,
+    userId: user.id,
+    kind: `game_server_${action}` as AuditKind,
+    target: server.name,
+    details: { gameServerId: id, gameId: server.gameId },
+    sourceIp: sourceIpFromRequest(req),
   });
 
   return NextResponse.json({ ok: true });

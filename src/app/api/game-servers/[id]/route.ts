@@ -4,9 +4,10 @@ import { db } from "@/db";
 import { gameServers } from "@/db/schema";
 import { getCurrentUser } from "@/lib/auth";
 import { dispatchCommand } from "@/lib/agent-hub";
+import { recordAudit, sourceIpFromRequest } from "@/lib/audit";
 
 export async function DELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getCurrentUser();
@@ -30,6 +31,15 @@ export async function DELETE(
   await dispatchCommand(server.hostId, {
     type: "delete_game_server",
     gameServerId: id,
+  });
+
+  await recordAudit({
+    hostId: server.hostId,
+    userId: user.id,
+    kind: "game_server_delete",
+    target: server.name,
+    details: { gameServerId: id, gameId: server.gameId },
+    sourceIp: sourceIpFromRequest(req),
   });
 
   // Tunnels row is removed by the ON DELETE CASCADE on gameServerId.

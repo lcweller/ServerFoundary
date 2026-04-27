@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { dispatchCommand } from "@/lib/agent-hub";
 import { resolveEgg, type EggJson, type EggInstall } from "@/lib/eggs";
 import { allocateTunnel } from "@/lib/tunnels";
+import { recordAudit, sourceIpFromRequest } from "@/lib/audit";
 
 export async function GET(
   _req: NextRequest,
@@ -196,6 +197,19 @@ export async function POST(
       },
     });
   }
+
+  await recordAudit({
+    hostId: id,
+    userId: user.id,
+    kind: "game_server_deploy",
+    target: server.name,
+    details: {
+      gameServerId: server.id,
+      gameId: server.gameId,
+      port: server.port,
+    },
+    sourceIp: sourceIpFromRequest(req),
+  });
 
   return NextResponse.json({ gameServer: server });
 }

@@ -40,6 +40,11 @@ export const hosts = pgTable("hosts", {
   environment: jsonb("environment"),
   agentVersion: text("agent_version"),
   lastHeartbeatAt: timestamp("last_heartbeat_at", { withTimezone: true }),
+  // PROJECT.md §3.6 — remote terminal is OFF by default. The owner has
+  // to explicitly enable it from the host's Settings tab. The ws-server
+  // refuses any /api/v1/terminal upgrade against a host with this set
+  // to false; flipping it on starts allowing connections immediately.
+  terminalEnabled: boolean("terminal_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -214,3 +219,39 @@ export const hostMetricsHourly = pgTable(
 );
 
 export type HostMetricsRow = typeof hostMetricsHourly.$inferSelect;
+
+/**
+ * Per-host audit log (PROJECT.md §3.6, §6.1).
+ *
+ * One row per platform-issued command, terminal session lifecycle event,
+ * and config change so the host owner can see a complete record of who
+ * did what to their machine.
+ *
+ * `kind` values currently in use (extend freely):
+ *   host_create / host_rename / host_delete / host_terminal_toggle
+ *   game_server_deploy / game_server_start / game_server_stop /
+ *   game_server_restart / game_server_delete
+ *   terminal_open / terminal_close
+ *
+ * `userId` may be null if a future automated job emits an event with no
+ * authenticated user (e.g., agent self-update Phase 8). `hostId` is
+ * always present.
+ */
+export const auditEvents = pgTable("audit_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  hostId: uuid("host_id")
+    .notNull()
+    .references(() => hosts.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  kind: text("kind").notNull(),
+  target: text("target"),
+  details: jsonb("details"),
+  sourceIp: text("source_ip"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type AuditEvent = typeof auditEvents.$inferSelect;

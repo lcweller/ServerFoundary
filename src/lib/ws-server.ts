@@ -24,6 +24,7 @@ import {
   resendTunnelsForHost,
 } from "@/lib/tunnel-manager";
 import { recordHeartbeat } from "@/lib/metrics";
+import { recordAudit } from "@/lib/audit";
 
 type AgentMessage =
   | {
@@ -168,7 +169,11 @@ export function initWsServer(server: {
           return;
         }
         const [host] = await db
-          .select({ id: hosts.id, userId: hosts.userId })
+          .select({
+            id: hosts.id,
+            userId: hosts.userId,
+            terminalEnabled: hosts.terminalEnabled,
+          })
           .from(hosts)
           .where(eq(hosts.id, hostId))
           .limit(1);
@@ -177,9 +182,29 @@ export function initWsServer(server: {
           socket.destroy();
           return;
         }
+        // PROJECT.md §3.6 — terminal is opt-in per host. Refuse the
+        // upgrade with a clear status if the owner hasn't toggled it on.
+        if (!host.terminalEnabled) {
+          socket.write(
+            "HTTP/1.1 403 Forbidden\r\n" +
+              "Content-Type: text/plain\r\n" +
+              "Connection: close\r\n\r\n" +
+              "Remote terminal is disabled for this host. Enable it in Settings.\r\n",
+          );
+          socket.destroy();
+          return;
+        }
+        const sourceIp =
+          (req.headers["cf-connecting-ip"] as string | undefined) ??
+          (req.headers["x-forwarded-for"] as string | undefined)
+            ?.split(",")[0]
+            ?.trim() ??
+          req.socket.remoteAddress ??
+          null;
         terminalWss!.handleUpgrade(req, socket, head, (ws) => {
-          (ws as unknown as { hostId: string; userId: string }).hostId = hostId;
+          (ws as unknown as { hostId: string }).hostId = hostId;
           (ws as unknown as { userId: string }).userId = row.userId;
+          (ws as unknown as { sourceIp: string | null }).sourceIp = sourceIp;
           terminalWss!.emit("connection", ws, req);
         });
         return;
@@ -418,11 +443,23 @@ function ipFromMetrics(m: unknown): string | null {
 
 function handleTerminalConnection(ws: WebSocket) {
   const hostId = (ws as unknown as { hostId: string }).hostId;
+  const userId = (ws as unknown as { userId: string }).userId;
+  const sourceIp = (ws as unknown as { sourceIp: string | null }).sourceIp;
   const sessionId = createHash("sha256")
     .update(`${hostId}-${Date.now()}-${Math.random()}`)
     .digest("hex")
     .slice(0, 16);
   browserSessions.set(sessionId, ws);
+
+  // Audit: terminal opened. PROJECT.md §3.6 + §6.1 require timestamp,
+  // source IP, user ID per session.
+  recordAudit({
+    hostId,
+    userId,
+    kind: "terminal_open",
+    target: sessionId,
+    sourceIp,
+  }).catch(() => undefined);
 
   ws.on("message", (raw) => {
     let msg: { type: string; data?: string; cols?: number; rows?: number };
@@ -452,5 +489,12 @@ function handleTerminalConnection(ws: WebSocket) {
   ws.on("close", () => {
     sendCommand(hostId, { type: "close_terminal", sessionId });
     browserSessions.delete(sessionId);
+    recordAudit({
+      hostId,
+      userId,
+      kind: "terminal_close",
+      target: sessionId,
+      sourceIp,
+    }).catch(() => undefined);
   });
 }
